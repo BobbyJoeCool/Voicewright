@@ -6,19 +6,19 @@ I want to make finished audio clips, such as narration, character lines, and sho
 
 Voicewright v1 is a local web app (a page served by a local FastAPI backend) with three areas:
 
-- **Voices:** describe a voice in words. The app designs a neutral Reference clip, then clones the Default emotion set from it so every Emotion preset sounds like the same person. I review each clip, regenerate or retune it, and accept the Draft voice into my library. Later I can add, retune, regenerate, or remove Emotion presets; the neutral clip stays locked.
+- **Voices:** describe a voice in words. The app designs a neutral Reference clip, then designs one Emotion preset for each emotion in the Default emotion set from the same description. I review each clip, regenerate or retune it, and accept the Draft voice into my library. Later I can add, retune, regenerate, or remove Emotion presets; the neutral clip and description stay locked.
 - **Sounds:** a local Sound library. I search Freesound from inside the app, preview results, and pick one; the app downloads and converts it and keeps its license and attribution.
 - **Scripts:** I pick one Voice, paste a Script such as `[angry] I hate you! (scream) {explosion}`, and generate. The app checks the whole Script first and rejects it, listing every missing emotion and sound, before spending minutes on generation. It then renders each Segment, assembles one WAV Output, and plays it. Outputs are temporary unless I save them; a Saved output keeps a record of the Script, Voice, preset values, and sound credits.
 
-Vocal effects such as `(laugh)` are skipped with a warning until a model passes the vocal-effects spike. Everything except the Freesound search runs offline. Terms follow `GLOSSARY.md`; the design is in `docs/design.md`.
+Vocal effects such as `(laugh)` are parsed and skipped with a warning; no model passed the vocal-effects spike well enough for v1. Everything except the Freesound search runs offline. Terms follow `GLOSSARY.md`; the design is in `docs/design.md`.
 
 ## User Stories
 
 ### Creating a Voice
 
 1. As a creator, I want to describe a voice in plain words (e.g. "gravelly older man, slow and calm"), so that I can get a voice without having a recording of anyone.
-2. As a creator, I want the app to generate a neutral Reference clip of about 15 seconds from my description, so that the Voice has one clear identity to clone from.
-3. As a creator, I want the app to generate one Emotion preset for each emotion in the Default emotion set, cloned from the neutral clip, so that every emotion sounds like the same person.
+2. As a creator, I want the app to generate a neutral Reference clip of about 15 seconds from my description, so that the Voice has one clear identity to judge every emotion against.
+3. As a creator, I want the app to generate one Emotion preset for each emotion in the Default emotion set, designed from my description plus the emotion, so that every emotion sounds like the same person delivering it.
 4. As a creator, I want to play each clip of a Draft voice in the page, so that I can judge it by ear before keeping it.
 5. As a creator, I want to regenerate a single Emotion preset without regenerating the others, so that one bad take doesn't cost me the good ones.
 6. As a creator, I want to regenerate the neutral clip while the Voice is still a Draft voice, so that I can try again until the identity is right.
@@ -41,7 +41,7 @@ Vocal effects such as `(laugh)` are skipped with a warning until a model passes 
 20. As a creator, I want a new or regenerated Emotion preset on a saved Voice to go through the same listen-and-accept review, so that a bad take never silently replaces a good one.
 21. As a creator, I want to retune an existing Emotion preset's values, so that I can fix a delivery without recreating the Voice.
 22. As a creator, I want to remove any Emotion preset except neutral from a saved Voice, so that I can drop emotions I never use without breaking untagged text.
-23. As a creator, I want the neutral Reference clip of a saved Voice to be locked, so that editing never turns the Voice into a different person.
+23. As a creator, I want the neutral Reference clip and the description of a saved Voice to be locked, so that editing never turns the Voice into a different person.
 24. As a creator, I want to delete a saved Voice, so that I can clear out Voices I no longer want.
 25. As a creator, I want new Voices to start with the Default emotion set (at least neutral, angry, sad, excited), so that common scripts work without extra setup.
 
@@ -103,14 +103,14 @@ Vocal effects such as `(laugh)` are skipped with a warning until a model passes 
 - **Audio converter:** turns any supported audio or video file into the standard format (16-bit PCM WAV, mono) using ffmpeg through pydub. Used by the Sound library and the standalone convert endpoint. Interface: convert(input file) → standard WAV, or a clear unsupported-format error.
 - **Script parser:** turns Script text into an ordered list of Segments (speech with its current emotion, Vocal effect, Sound effect). Emotion tags are state that carries forward; untagged speech is neutral; whitespace-only speech between markers is dropped. Malformed or unclosed brackets are parse errors with character positions.
 - **Script checker:** given parsed Segments, a Voice, the Sound library, and the vocal-effect engine's capability, returns either "ready" plus warnings, or a rejection listing every missing emotion and every missing sound name. Nothing is generated on rejection.
-- **Voice library:** owns saved Voices and Draft voices. A Voice holds its name, its description, its locked neutral Reference clip, and its Emotion presets (Reference clip, exaggeration, cfg). Stored as files on disk: one folder per Voice with WAVs plus a JSON preset file in the shape shown in `docs/design.md` section 3 (`clip`, `exaggeration`, `cfg`). Draft voices live in a separate draft area that is not cleared on startup. Adding, regenerating, or retuning a preset on a saved Voice produces a take held in the draft area (so it survives restart) that replaces the preset only when accepted. The neutral preset cannot be removed, and the neutral Reference clip cannot be replaced, once the Voice is saved.
+- **Voice library:** owns saved Voices and Draft voices. A Voice holds its name, its locked description, its locked neutral Reference clip, and its Emotion presets (Reference clip, exaggeration, cfg). Stored as files on disk: one folder per Voice with WAVs plus a JSON preset file in the shape shown in `docs/design.md` section 3 (`clip`, `exaggeration`, `cfg`). Draft voices live in a separate draft area that is not cleared on startup. Adding, regenerating, or retuning a preset on a saved Voice produces a take held in the draft area (so it survives restart) that replaces the preset only when accepted. The neutral preset cannot be removed, and the neutral Reference clip cannot be replaced, once the Voice is saved.
 - **Default emotion set:** a data file listing the emotions every new Voice starts with and the sample sentence and starting exaggeration/cfg for each. v1 ships at least neutral, angry, sad, excited. A custom Emotion preset added to a saved Voice takes its name from the user, uses the user's sample sentence or a generic one, and starts from the neutral preset's values unless the user sets others.
 - **Sound library:** owns named sounds: one standard WAV per name plus source, author, license, and attribution metadata. Names are lowercase, matched case-insensitively against `{name}` in Scripts.
 - **Freesound client:** search and download only; used solely by the Sound library's add flow. The API key comes from a local config file or environment variable, never from the repo. Generation never calls it (ADR `docs/adr/0001-local-sound-library.md`).
 - **Engines:** three narrow interfaces, each with a real implementation and a fake for tests:
-  - Voice design engine: description + text → WAV. Real implementation is VoxCPM2 or Qwen3-TTS VoiceDesign, chosen after the spikes in `spikes/`.
-  - Speech engine: text + Reference clip + exaggeration + cfg → WAV. Also used to produce Emotion preset Reference clips from the neutral clip, unless the consistency spike picks the design engine's style-cloning instead (see Pending on spikes). Real implementation is Chatterbox via chatterbox-mlx, hybrid-mlx backend, using the long-text path above about 50 words. Emotion presets store Chatterbox's values directly (ADR `docs/adr/0002-emotion-presets-store-chatterbox-settings.md`).
-  - Vocal-effect engine: effect name + Reference clip → WAV, plus a list of supported effect names. v1 ships an implementation that supports no effects; Chatterbox Turbo is plugged in only if it passes its spike, translating `(laugh)` into Turbo's `[laugh]`. Turbo comes from a second package, `chatterbox-tts`, which shares the `chatterbox` import namespace with chatterbox-mlx; if they can't coexist in one environment, Turbo runs in its own environment as a subprocess.
+  - Voice design engine: description + text → WAV. Produces the neutral Reference clip and every Emotion preset Reference clip, each from the Voice's description (plus the emotion, for presets; ADR `docs/adr/0003-qwen-designs-every-emotion-preset.md`). Real implementation is Qwen3-TTS VoiceDesign via `mlx-audio`, chosen in step 0.2.
+  - Speech engine: text + Reference clip + exaggeration + cfg → WAV. Real implementation is Chatterbox via chatterbox-mlx, hybrid-mlx backend (`ChatterboxTTSMLX.from_pretrained(device="mps")`), using the long-text path above about 50 words. Emotion presets store Chatterbox's values directly (ADR `docs/adr/0002-emotion-presets-store-chatterbox-settings.md`).
+  - Vocal-effect engine: effect name + Reference clip → WAV, plus a list of supported effect names. v1 ships an implementation that supports no effects, so every Vocal effect is a warning. Chatterbox Turbo was tested in step 0.2 and deferred (see `docs/design.md` Open questions and tests).
 - **Model manager:** guarantees at most one large model is loaded at a time. Chatterbox loads once at startup and stays loaded (`docs/design.md` section 6). When the voice design or vocal-effect engine is needed, the manager unloads Chatterbox, loads that engine, and reloads Chatterbox afterwards.
 - **Generator:** runs the checker, then renders each Segment through the right engine or the Sound library, and hands the pieces to the assembler. Reports progress (current Segment, total).
 - **Assembler:** stitches Segment audio in order with short gaps (a short crossfade where a gap sounds abrupt; exact lengths are tuned by ear), normalizes volume across Segments, and writes one WAV. Sound effects play in sequence only.
@@ -142,11 +142,13 @@ Vocal effects such as `(laugh)` are skipped with a warning until a model passes 
 - One command starts the backend and opens the page in the default browser.
 - The README leads with a short demo (screenshot of the page and a sample Output) once v1 works.
 
-### Pending on spikes
+### Decided by the spikes
 
-- Which voice design engine ships (VoxCPM2 or Qwen3-TTS) is decided by `spikes/test_voxcpm_design.py` and `spikes/test_qwen_design.py`. If neither runs acceptably on the M2, v1 instead creates a Voice from an uploaded recording passed through the Audio converter. In that case stories 1, 2, 6, and 7 become: upload a recording, trim it to about 15 seconds of clean speech as the neutral Reference clip, and re-upload to try again. Everything after the neutral clip is unchanged.
-- How Emotion preset Reference clips are produced is decided by the consistency spike (`spikes/test_voxcpm_design.py`, `spikes/test_chatterbox_clone.py`): either Chatterbox from the neutral clip with the preset's values, or VoxCPM2's style-cloning from the neutral clip. Either way, Script generation always uses Chatterbox with the preset's clip and values.
-- Whether Vocal effects render in v1 is decided by `spikes/test_turbo_effects.py`.
+Step 0.2 (results in `docs/design.md` Open questions and tests):
+
+- Voice design ships on Qwen3-TTS VoiceDesign. The upload fallback is not needed, so stories 1, 2, 6, and 7 stand as written.
+- Emotion preset Reference clips are designed by Qwen3-TTS from the description plus the emotion, not cloned from the neutral clip (ADR 0003). Script generation always uses Chatterbox with the preset's clip and values.
+- Vocal effects do not render in v1.
 
 ## Testing Decisions
 
@@ -161,7 +163,9 @@ Vocal effects such as `(laugh)` are skipped with a warning until a model passes 
 ## Out of Scope
 
 - Multiple Voices or Characters in one Script.
-- Creating a Voice from an uploaded recording, unless the voice-design spike fails (then it replaces description-based design in v1).
+- Creating a Voice from an uploaded recording.
+- Rendering Vocal effects (they are parsed and skipped with a warning).
+- Editing a saved Voice's description.
 - Sound effects that overlay speech (ambience, ducking).
 - Generated sound effects (Stable Audio Open).
 - Adding more emotions to the Default emotion set from the UI, or saving a Voice's custom emotion into the Default emotion set.

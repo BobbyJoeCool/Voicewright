@@ -17,9 +17,9 @@ Everything runs locally and uses free, open-source models. The only network use 
 ## v1 scope
 
 - One Voice per Script.
-- Voices are created from a text description. Creating a Voice from an uploaded recording is a future feature, used in v1 only as a fallback if no voice-design model runs acceptably on the M2.
+- Voices are created from a text description with Qwen3-TTS VoiceDesign. Creating a Voice from an uploaded recording is a future feature (the v1 fallback was not needed: Qwen passed the M2 spike).
 - Sound effects come from the local sound library and play in sequence, not over speech.
-- Vocal effects are skipped with a warning until a model passes the vocal-effects test.
+- Vocal effects are parsed but skipped with a warning. No model passed the vocal-effects test well enough (see Open questions and tests), so rendering them is a future feature.
 - The user works in a local web page served by the FastAPI backend.
 
 ## Environment
@@ -27,15 +27,15 @@ Everything runs locally and uses free, open-source models. The only network use 
 - MacBook with M2 chip, 24GB RAM
 - Python 3.11 virtual environment (3.12 also works; 3.13 and newer do not, because `chatterbox-mlx` requires `>=3.11,<3.13`)
 - ffmpeg (`brew install ffmpeg`)
-- Only one large model in memory at a time. Chatterbox (hybrid-mlx) uses about 14 to 16GB.
+- Only one large model in memory at a time. Chatterbox (hybrid-mlx) uses about 14 to 16GB; Qwen3-TTS VoiceDesign peaked at 5.8GB in the spike.
 
 ## Models and services
 
 | Role | Tool | Status |
 |---|---|---|
-| Speech and voice cloning | Chatterbox via `chatterbox-mlx` (`hybrid-mlx` backend), MIT license | Tested, works |
-| Voice design from a text description | VoxCPM2 (Apache 2.0) or Qwen3-TTS VoiceDesign | Untested on Mac |
-| Vocal effects in the speaker's voice | Candidate: Chatterbox Turbo (`chatterbox-tts`; inline `[laugh]`, `[chuckle]`, `[sigh]`, `[cough]`). Breeze TTS 2 ruled out: documented for Linux with NVIDIA CUDA only, and its weights are non-commercial | Untested on Mac |
+| Speech and voice cloning | Chatterbox via `chatterbox-mlx` (`hybrid-mlx` backend: the `ChatterboxTTSMLX` class, loaded with `device="mps"`), MIT license | Tested, works |
+| Voice design from a text description, neutral clip and every emotion preset | Qwen3-TTS VoiceDesign via `mlx-audio` (`mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16`). VoxCPM2 also ran but sounded weaker and needs about 13GB | Chosen in step 0.2 |
+| Vocal effects in the speaker's voice | None in v1. Chatterbox Turbo (`chatterbox-tts`) runs on the M2 but only its chuckle was convincing (see Open questions and tests). Breeze TTS 2 ruled out: documented for Linux with NVIDIA CUDA only, and its weights are non-commercial | Deferred |
 | Sound effects | Local sound library, filled by searching Freesound in the app | Not started |
 | Audio conversion and assembly | ffmpeg through `pydub` | Not started |
 | Backend and UI | FastAPI, serving a local web page | Not started |
@@ -63,8 +63,8 @@ Every audio file that enters the app goes through the converter before anything 
 ## 2. Voice creation
 
 1. **Describe the voice**, for example "gravelly older man, slow and calm."
-2. **Generate the neutral reference clip** reading a neutral sample sentence.
-3. **Generate the emotion presets:** the same voice reading sample sentences for each emotion in the default emotion set.
+2. **Generate the neutral reference clip:** Qwen3-TTS designs it from the description, reading a neutral sample sentence.
+3. **Generate the emotion presets:** Qwen3-TTS designs each one from the description plus the emotion (for example "... Speaking in a sad tone."), reading that emotion's sample sentence.
 4. **Review:** the user listens to each clip and can accept it, regenerate it, edit the description, or adjust its `exaggeration` and `cfg` values.
 5. **Accept or discard:** accepting saves the clips and preset values to the voice library. Discarding deletes the draft.
 
@@ -79,15 +79,13 @@ A Voice under review is a draft voice. Its clips live in a draft area, separate 
 ### Editing a saved Voice
 
 - Emotion presets can be added, retuned, regenerated, or removed after the Voice is saved. New or regenerated presets go through the same review step.
-- The neutral reference clip is locked. Every emotion preset is cloned from it, so replacing it would change who the Voice sounds like. A new identity means a new Voice.
+- The neutral reference clip and the description are locked. The neutral clip is the take the user accepted as the Voice, and every preset, including ones added later, is designed from the description, so changing either would change who the Voice sounds like. A new identity means a new Voice.
 
 ### Voice consistency
 
-Designing each emotion separately from the text description may produce a slightly different person each time. To prevent this:
+The original plan was to design only the neutral clip and clone every emotion from it, so each emotion would be the same person. The step 0.2 spikes changed that (ADR `docs/adr/0003-qwen-designs-every-emotion-preset.md`): cloning kept the voice only close, and Qwen3-TTS designing each emotion from the description sounded better. Each emotion preset is therefore designed separately from the description.
 
-- Design **only the neutral voice** from the description.
-- Create emotion presets by **cloning from the neutral clip**, adding the emotion through style instructions (VoxCPM2 supports this, e.g. `(slightly faster, cheerful tone)`) or through Chatterbox's `exaggeration` and `cfg` settings.
-- Qwen3-TTS's "Voice Design then Clone" workflow is built for this approach. Its clone model takes no emotion instruction, so with Qwen the emotion presets come from Chatterbox's settings.
+Designing each emotion separately can still produce a slightly different person. The safeguard is the review step: the user regenerates one preset until it matches the neutral clip. If drift turns out to be a real problem, the tested fallback is cloning each emotion from the neutral clip with VoxCPM2's style instructions.
 
 ## 3. Voice library
 
@@ -147,7 +145,7 @@ Tuning guidance from the `chatterbox-mlx` README:
 ## 6. Segment generation
 
 - **Speech:** Chatterbox with the preset's clip and settings. Use `generate_long` for text over about 50 words. Load the model once at startup, not per request.
-- **Vocal effects:** the weakest part of the pipeline. Chatterbox only speaks text, so phonetic spellings of laughs or screams sound stilted. Chatterbox Turbo is the first candidate to test. Its tags use square brackets, so the app translates the script's `(laugh)` into Turbo's `[laugh]`; Turbo has no `exaggeration` or `cfg`, so it would be used only for vocal-effect segments. Until one passes, vocal effects are skipped with a warning.
+- **Vocal effects:** skipped with a warning in v1. Chatterbox only speaks text, so phonetic spellings sound stilted, and Chatterbox Turbo's tags (`[laugh]` etc., translated from the script's `(laugh)`) passed only for chuckle in the spike. See Future versions.
 - **Sound effects:** read from the local sound library. Generation never calls the network.
 
 ### Sound library
@@ -193,10 +191,24 @@ Generated audio is presented but not kept by default.
 
 ## Open questions and tests
 
-1. **Vocal effects:** can any model produce convincing laughs, screams, and sighs in a cloned voice? (Highest risk. Doesn't block v1.) Test: `spikes/test_turbo_effects.py`.
-2. **Voice consistency:** design one voice, create angry and sad variants both by separate design and by cloning from neutral, and compare. Test: `spikes/test_voxcpm_design.py` and `spikes/test_chatterbox_clone.py`.
-3. **Mac support:** do VoxCPM2 and Qwen3-TTS run acceptably on the M2? If neither does, v1 falls back to creating Voices from an uploaded recording. Test: `spikes/test_voxcpm_design.py` and `spikes/test_qwen_design.py`.
-4. **Memory:** confirm the load-and-unload pattern keeps memory pressure out of the red when switching between models.
+Step 0.2 ran these spikes on the M2 on 2026-10-30. The scripts are in `spikes/`. RTF is seconds of work per second of audio.
+
+1. **Mac support and voice design: Qwen3-TTS chosen.**
+   - Qwen3-TTS VoiceDesign: neutral clip matched the description and was clean, RTF 1.37, peak RSS 5.8GB, memory pressure green. Judged "a lot better" than VoxCPM2, with much better emotions.
+   - VoxCPM2: ran, neutral clip matched the description, peak RSS 13.8GB, memory pressure yellow. Emotions only partly landed (sad sounded thoughtful, excited sounded upset).
+   - The recording-upload fallback is not needed.
+2. **Voice consistency: each emotion designed by Qwen3-TTS** (ADR 0003).
+   - VoxCPM2 style-cloning from VoxCPM2's neutral clip: the same man, emotions partly.
+   - Chatterbox cloning from either engine's neutral clip (starting exaggeration/cfg values): close to the same man, emotions came through, RTF 2.5 to 2.9, green.
+   - VoxCPM2 style-cloning from Qwen's neutral clip: close to the same man, emotions came through, better than VoxCPM2 alone, RTF 2.5 to 3.9, peak RSS 13.3GB.
+   - The user judged that cloning was what made the voice drift and chose to design each emotion with Qwen. Not checked: whether Qwen's separately designed emotions sound like the same man. Review in the Draft voice is the safeguard.
+3. **Vocal effects: not in v1.** Chatterbox Turbo ran on `mps`, RTF about 2.0, green, and stayed in the cloned voice. `[chuckle]` was convincing; `[laugh]` and `[cough]` sounded forced or fake; `[sigh]` came out as breathing in; `(scream)`, which Turbo doesn't document, was read aloud as the word. The user chose to leave vocal effects out of v1.
+4. **Memory:** each model ran alone without going red. Only VoxCPM2 reached yellow, and v1 doesn't use it. The load-and-unload switch between Qwen and Chatterbox is still to be confirmed in the smoke test (step 5.2).
+
+Library notes from the spikes, for the real engines:
+
+- `chatterbox-mlx` 1.0.6: the hybrid backend is the `ChatterboxTTSMLX` class; `from_pretrained(device="mps")`. `device="hybrid-mlx"` is rejected.
+- Resemble's `perth` watermarker (used by Chatterbox) imports `pkg_resources`, so pin `setuptools<81`; with a newer setuptools it silently fails to load.
 
 ## Future versions
 
@@ -210,6 +222,7 @@ Deferred from v1, planned for later:
 - **Save custom emotions to the default set,** so an emotion added to one Voice can be offered to every new Voice.
 - **Per-line overrides** of `exaggeration` and `cfg` within a script.
 - **Re-render** a saved output from its sidecar record.
+- **Vocal effects** in the speaker's voice. Chatterbox Turbo's `[chuckle]` already works; laugh, cough, sigh, and scream need a better model or approach.
 
 ## Content policy
 
