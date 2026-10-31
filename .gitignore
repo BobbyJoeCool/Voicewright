@@ -147,3 +147,11 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# ---------- Personal / working notes (not part of the project deliverable) ----------
+DevNotes/
+
+# ---------- Model spikes ----------
+spikes/.venvs/
+spikes/out/
+__pycache__/
