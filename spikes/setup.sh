@@ -15,6 +15,6 @@ make_env () {  # name, packages...
 }
 make_env voxcpm     voxcpm soundfile
 make_env qwen       mlx-audio soundfile
-make_env chatterbox chatterbox-mlx
-make_env turbo      chatterbox-tts
+make_env chatterbox chatterbox-mlx "setuptools<81"
+make_env turbo      chatterbox-tts "setuptools<81"  # perth (watermarker) imports pkg_resources, removed in setuptools 81
 echo "All environments created in spikes/.venvs/"
