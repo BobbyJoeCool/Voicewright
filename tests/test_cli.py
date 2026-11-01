@@ -270,3 +270,21 @@ def test_a_chain_of_links_names_the_final_missing_target(launch_with_data_folder
     app = launch_with_data_folder(link)
 
     assert_fails_with_a_plain_message(app, f"links to {missing}, which doesn't exist")
+
+
+@pytest.fixture
+def locked_folder(tmp_path):
+    """A folder nobody can look inside, unlocked again so pytest can clean it up."""
+    folder = tmp_path / "locked"
+    folder.mkdir()
+    folder.chmod(0o000)
+    yield folder
+    folder.chmod(0o700)
+
+
+def test_a_data_folder_under_a_locked_folder_is_reported(launch_with_data_folder, locked_folder):
+    data_folder = locked_folder / "Voicewright"
+
+    app = launch_with_data_folder(data_folder)
+
+    assert_fails_with_a_plain_message(app, str(data_folder), "Permission denied")
