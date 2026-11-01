@@ -35,7 +35,9 @@ def load_config(path: Path) -> Config:
     try:
         if not path.is_file():
             write_default_config(path)
-        values = tomllib.loads(path.read_text())
+        values = tomllib.loads(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        raise ConfigError(f"{path} is not saved as UTF-8; save it as UTF-8 and try again") from None
     except OSError as error:
         raise ConfigError(f"can't use the config file {path}: {error.strerror}") from None
     except tomllib.TOMLDecodeError as error:
@@ -43,7 +45,14 @@ def load_config(path: Path) -> Config:
     data_folder = values.get("data_folder")
     if not isinstance(data_folder, str):
         raise ConfigError(f"{path} needs data_folder set to a folder path in quotes, {EXAMPLE}")
-    folder = Path(data_folder).expanduser()
+    if "\0" in data_folder:
+        raise ConfigError(f"{path} has a null character in data_folder; remove it")
+    try:
+        folder = Path(data_folder).expanduser()
+    except RuntimeError:
+        raise ConfigError(
+            f"{path} sets data_folder under an unknown home folder: {data_folder}"
+        ) from None
     if not folder.is_absolute():
         raise ConfigError(f"{path} needs data_folder to be a full path or start with ~, {EXAMPLE}")
     return Config(data_folder=folder)
@@ -59,5 +68,6 @@ def write_default_config(path: Path) -> None:
         f"data_folder = {json.dumps(str(default_data_folder()))}\n"
         "# How many recent Outputs to keep before the oldest is removed (5 to 10).\n"
         f"output_cache_size = {DEFAULT_OUTPUT_CACHE_SIZE}\n"
-        f"freesound_api_key = {json.dumps(DEFAULT_FREESOUND_API_KEY)}\n"
+        f"freesound_api_key = {json.dumps(DEFAULT_FREESOUND_API_KEY)}\n",
+        encoding="utf-8",
     )

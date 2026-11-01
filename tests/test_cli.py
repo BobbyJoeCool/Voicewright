@@ -83,11 +83,17 @@ def assert_fails_with_a_plain_message(app, *expected_in_message, exit_code=1):
         pytest.param("data_folder = 5\n", id="data-folder-not-text"),
         pytest.param('data_folder = "relative/data"\n', id="relative-data-folder"),
         pytest.param('data_folder = ""\n', id="empty-data-folder"),
+        pytest.param('data_folder = "~nosuchuser/x"\n', id="unknown-user-home"),
+        pytest.param('data_folder = "/Users/Zoë"\n'.encode("latin-1"), id="not-utf-8"),
+        pytest.param('data_folder = "/tmp/a\\u0000b"\n', id="null-character"),
     ],
 )
 def test_a_bad_config_is_reported_by_file_name(run_voicewright, tmp_path, config_text):
     config_path = tmp_path / "config.toml"
-    config_path.write_text(config_text)
+    if isinstance(config_text, bytes):
+        config_path.write_bytes(config_text)
+    else:
+        config_path.write_text(config_text)
 
     app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
 
@@ -114,8 +120,8 @@ def test_a_config_path_that_cannot_be_used_is_reported(run_voicewright, tmp_path
     assert_fails_with_a_plain_message(app, str(folder))
 
 
-@pytest.mark.parametrize("port", ["0", "70000"])
+@pytest.mark.parametrize("port", ["0", "70000", "abc"])
 def test_a_port_outside_1_to_65535_is_a_usage_error(run_voicewright, port):
     app = run_voicewright("--port", port)
 
-    assert_fails_with_a_plain_message(app, "--port", exit_code=2)
+    assert_fails_with_a_plain_message(app, f"{port} is not a port from 1 to 65535", exit_code=2)

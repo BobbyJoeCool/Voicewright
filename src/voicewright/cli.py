@@ -49,10 +49,9 @@ def main() -> None:
 
 
 def port_number(text: str) -> int:
-    port = int(text)
-    if not 1 <= port <= 65535:
-        raise argparse.ArgumentTypeError(f"{port} is not a port from 1 to 65535")
-    return port
+    if not text.isdigit() or not 1 <= int(text) <= 65535:
+        raise argparse.ArgumentTypeError(f"{text} is not a port from 1 to 65535")
+    return int(text)
 
 
 def open_when_started(server: uvicorn.Server, url: str) -> None:
