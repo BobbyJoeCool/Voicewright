@@ -51,3 +51,11 @@ def test_data_folder_under_home_can_be_written_with_a_tilde(write_config, tmp_pa
     start(write_config(data_folder="~/Audio/Voicewright"))
 
     assert subfolders(tmp_path / "home" / "Audio" / "Voicewright") == DATA_SUBFOLDERS
+
+
+def test_first_run_config_is_private_to_the_user(config_path, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    start(config_path)
+
+    assert config_path.stat().st_mode & 0o077 == 0, "only the owner may read the API key"

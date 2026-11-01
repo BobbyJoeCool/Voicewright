@@ -13,7 +13,7 @@ The last step starts the app at <http://127.0.0.1:8765/> and opens it in your br
 
 ### Settings and data
 
-On first run the app writes a config file to `~/.config/voicewright/config.toml` (or wherever `--config` points) and creates the app data folder it names, `~/Voicewright` by default, with `voices`, `drafts`, `sounds`, `cache`, and `saved` subfolders. The config file also holds the Output cache size (5 to 10) and your Freesound API key. Keep it out of git.
+On first run the app writes a config file to `~/.config/voicewright/config.toml` (or wherever `--config` points) and creates the app data folder it names, `~/Voicewright` by default, with `voices`, `drafts`, `sounds`, `cache`, and `saved` subfolders. To move the data folder, set `data_folder` to a full path or one starting with `~`. The config file also holds the Output cache size (5 to 10) and your Freesound API key, so it is created readable only by you. Keep it out of git.
 
 ## Develop
 

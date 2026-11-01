@@ -4,6 +4,12 @@ from fastapi.testclient import TestClient
 from voicewright.app import create_app
 
 
+@pytest.fixture(autouse=True)
+def work_in_temp_folder(tmp_path, monkeypatch):
+    """Run every test from a temp folder, so a relative path can never land in the repo."""
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def config_path(tmp_path):
     """A config path inside a fresh temp folder; the file does not exist yet."""

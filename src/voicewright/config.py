@@ -10,6 +10,12 @@ from pathlib import Path
 DEFAULT_OUTPUT_CACHE_SIZE = 5
 DEFAULT_FREESOUND_API_KEY = ""
 
+EXAMPLE = 'e.g. data_folder = "~/Voicewright"'
+
+
+class ConfigError(Exception):
+    """The config file can't be used; the message names the file and what to fix."""
+
 
 @dataclass(frozen=True)
 class Config:
@@ -26,15 +32,28 @@ def default_data_folder() -> Path:
 
 def load_config(path: Path) -> Config:
     """Read the config file, writing one with default settings on first run."""
-    if not path.is_file():
-        write_default_config(path)
-    values = tomllib.loads(path.read_text())
-    return Config(data_folder=Path(values["data_folder"]).expanduser())
+    try:
+        if not path.is_file():
+            write_default_config(path)
+        values = tomllib.loads(path.read_text())
+    except OSError as error:
+        raise ConfigError(f"can't use the config file {path}: {error.strerror}") from None
+    except tomllib.TOMLDecodeError as error:
+        raise ConfigError(f"{path} is not valid TOML: {error}") from None
+    data_folder = values.get("data_folder")
+    if not isinstance(data_folder, str):
+        raise ConfigError(f"{path} needs data_folder set to a folder path in quotes, {EXAMPLE}")
+    folder = Path(data_folder).expanduser()
+    if not folder.is_absolute():
+        raise ConfigError(f"{path} needs data_folder to be a full path or start with ~, {EXAMPLE}")
+    return Config(data_folder=folder)
 
 
 def write_default_config(path: Path) -> None:
     # json.dumps gives a quoted, escaped string that is also a valid TOML basic string.
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Owner-only from the start: the file will hold the Freesound API key.
+    path.touch(mode=0o600)
     path.write_text(
         "# Voicewright settings. Keep this file out of git: it can hold your Freesound API key.\n"
         f"data_folder = {json.dumps(str(default_data_folder()))}\n"
