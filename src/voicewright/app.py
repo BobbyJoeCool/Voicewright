@@ -11,12 +11,17 @@ STATIC_FOLDER = Path(__file__).parent / "static"
 
 def create_app(config_path: Path) -> FastAPI:
     config = load_config(config_path)
+    folder = config.data_folder
+    if folder.is_symlink() and not folder.exists():
+        raise ConfigError(
+            f"the data folder {folder} set in {config_path} links to {folder.readlink()}, "
+            "which doesn't exist; connect the drive it is on or change data_folder"
+        )
     try:
-        DataFolder(config.data_folder).create()
+        DataFolder(folder).create()
     except OSError as error:
         raise ConfigError(
-            f"can't create the data folder {config.data_folder} set in {config_path}: "
-            f"{error.strerror}"
+            f"can't create the data folder {folder} set in {config_path}: {error.strerror}"
         ) from None
 
     app = FastAPI(title="Voicewright")

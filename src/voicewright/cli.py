@@ -60,7 +60,7 @@ def main() -> None:
 
 
 def port_number(text: str) -> int:
-    if not text.isdigit() or not 1 <= int(text) <= 65535:
+    if not (text.isascii() and text.isdigit()) or not 1 <= int(text) <= 65535:
         raise argparse.ArgumentTypeError(f"{text} is not a port from 1 to 65535")
     return int(text)
 

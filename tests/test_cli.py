@@ -156,7 +156,7 @@ def test_a_config_path_that_cannot_be_used_is_reported(run_voicewright, tmp_path
     assert_fails_with_a_plain_message(app, str(folder))
 
 
-@pytest.mark.parametrize("port", ["0", "70000", "abc"])
+@pytest.mark.parametrize("port", ["0", "70000", "abc", "²", "１２３４"])
 def test_a_port_outside_1_to_65535_is_a_usage_error(run_voicewright, port):
     app = run_voicewright("--port", port)
 
@@ -187,3 +187,15 @@ def test_a_port_taken_by_another_program_is_reported(run_voicewright):
         app = run_voicewright("--port", str(port))
 
         assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
+
+
+def test_a_data_folder_linked_to_a_missing_target_is_reported(run_voicewright, tmp_path):
+    link = tmp_path / "data-link"
+    missing = tmp_path / "unmounted-drive" / "Voicewright"
+    link.symlink_to(missing)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f"data_folder = {json.dumps(str(link))}\n")
+
+    app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
+
+    assert_fails_with_a_plain_message(app, str(link), f"links to {missing}", "doesn't exist")

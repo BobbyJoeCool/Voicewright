@@ -77,3 +77,14 @@ def test_a_config_saved_with_a_byte_order_mark_is_read(start, write_config, data
     start(config_path)
 
     assert subfolders(data_folder) == DATA_SUBFOLDERS
+
+
+def test_a_data_folder_can_be_a_link_to_another_drive(start, write_config, tmp_path):
+    drive = tmp_path / "external-drive"
+    drive.mkdir()
+    link = tmp_path / "data-link"
+    link.symlink_to(drive)
+
+    start(write_config(data_folder=str(link)))
+
+    assert subfolders(drive) == DATA_SUBFOLDERS
