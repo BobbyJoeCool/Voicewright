@@ -40,7 +40,7 @@ def write_config(config_path, data_folder):
 
 
 def run_app(config_path):
-    """Run the app in-process with the given config, as the `voicewright` command would."""
+    """The FastAPI app built from this config, run in-process (no server, no port)."""
     return TestClient(create_app(config_path))
 
 
