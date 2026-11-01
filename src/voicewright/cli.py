@@ -1,10 +1,10 @@
 """The `voicewright` command: start the local server and open the page in the browser."""
 
 import argparse
-import socket
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -37,11 +37,12 @@ def main() -> None:
     args = parser.parse_args()
     url = f"http://{HOST}:{args.port}/"
 
-    if serves_voicewright(url):
+    holder = whats_on(url)
+    if holder == "voicewright":
         print(f"Voicewright is already running at {url}", flush=True)
         webbrowser.open(url)
         return
-    if port_in_use(args.port):
+    if holder == "other":
         sys.exit(
             f"voicewright: port {args.port} is in use by another program; pick another with --port"
         )
@@ -65,26 +66,19 @@ def port_number(text: str) -> int:
     return int(text)
 
 
-def serves_voicewright(url: str) -> bool:
-    """Whether a Voicewright page already answers at this address."""
+def whats_on(url: str) -> str:
+    """What answers at this local address: "nothing", "voicewright", or "other"."""
     # No proxies: the probe only ever talks to this machine.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(url, timeout=2) as response:
-            return b"<title>Voicewright</title>" in response.read()
+            return "voicewright" if b"<title>Voicewright</title>" in response.read() else "other"
+    except urllib.error.URLError as error:
+        # Refused means nothing listens. Anything else (an HTTP error, a timeout) means a
+        # program accepted the connection, including one listening on every address.
+        return "nothing" if isinstance(error.reason, ConnectionRefusedError) else "other"
     except OSError:
-        return False
-
-
-def port_in_use(port: int) -> bool:
-    with socket.socket() as probe:
-        # Same option uvicorn sets, so a port it could bind is never reported as taken.
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            probe.bind((HOST, port))
-        except OSError:
-            return True
-    return False
+        return "other"
 
 
 def open_when_started(server: uvicorn.Server, url: str) -> None:

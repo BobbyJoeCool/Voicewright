@@ -1,3 +1,4 @@
+import http.server
 import json
 import os
 import queue
@@ -178,9 +179,10 @@ def test_a_second_launch_opens_the_running_app(run_voicewright, browser_log):
     assert browser_log.read_text().split() == [f"http://127.0.0.1:{port}/"] * 2
 
 
-def test_a_port_taken_by_another_program_is_reported(run_voicewright):
+@pytest.mark.parametrize("address", ["127.0.0.1", "0.0.0.0"])
+def test_a_port_taken_by_another_program_is_reported(run_voicewright, address):
     with socket.socket() as other_program:
-        other_program.bind(("127.0.0.1", 0))
+        other_program.bind((address, 0))
         other_program.listen()
         port = other_program.getsockname()[1]
 
@@ -189,13 +191,69 @@ def test_a_port_taken_by_another_program_is_reported(run_voicewright):
         assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
 
 
-def test_a_data_folder_linked_to_a_missing_target_is_reported(run_voicewright, tmp_path):
+@pytest.mark.parametrize("below_the_link", ["", "Voicewright"])
+def test_a_data_folder_linked_to_a_missing_target_is_reported(
+    run_voicewright, tmp_path, below_the_link
+):
     link = tmp_path / "data-link"
     missing = tmp_path / "unmounted-drive" / "Voicewright"
     link.symlink_to(missing)
+    data_folder = link / below_the_link if below_the_link else link
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f"data_folder = {json.dumps(str(data_folder))}\n")
+
+    app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
+
+    assert_fails_with_a_plain_message(app, str(link), f"links to {missing}", "doesn't exist")
+
+
+@pytest.mark.parametrize(
+    "status, page",
+    [
+        pytest.param(200, b"<title>Some other app</title>", id="another-page"),
+        pytest.param(404, b"not found", id="http-error"),
+    ],
+)
+def test_a_port_taken_by_another_web_server_is_reported(run_voicewright, status, page):
+    class OtherWebServer(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(page)
+
+        def log_message(self, *args):
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), OtherWebServer) as other:
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        port = other.server_address[1]
+
+        app = run_voicewright("--port", str(port))
+
+        assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
+        other.shutdown()
+
+
+def test_a_data_folder_link_that_loops_is_reported(run_voicewright, tmp_path):
+    link = tmp_path / "data-link"
+    link.symlink_to(link)
     config_path = tmp_path / "config.toml"
     config_path.write_text(f"data_folder = {json.dumps(str(link))}\n")
 
     app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
 
-    assert_fails_with_a_plain_message(app, str(link), f"links to {missing}", "doesn't exist")
+    assert_fails_with_a_plain_message(app, str(link), "doesn't exist")
+
+
+def test_a_chain_of_links_names_the_final_missing_target(run_voicewright, tmp_path):
+    missing = tmp_path / "unmounted-drive" / "Voicewright"
+    middle = tmp_path / "middle-link"
+    middle.symlink_to(missing)
+    link = tmp_path / "data-link"
+    link.symlink_to(middle)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f"data_folder = {json.dumps(str(link))}\n")
+
+    app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
+
+    assert_fails_with_a_plain_message(app, f"links to {missing}, which doesn't exist")

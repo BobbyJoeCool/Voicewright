@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -12,10 +13,15 @@ STATIC_FOLDER = Path(__file__).parent / "static"
 def create_app(config_path: Path) -> FastAPI:
     config = load_config(config_path)
     folder = config.data_folder
-    if folder.is_symlink() and not folder.exists():
+    broken_link = next(
+        (p for p in (folder, *folder.parents) if p.is_symlink() and not p.exists()), None
+    )
+    if broken_link:
         raise ConfigError(
-            f"the data folder {folder} set in {config_path} links to {folder.readlink()}, "
-            "which doesn't exist; connect the drive it is on or change data_folder"
+            f"the data folder {folder} set in {config_path} goes through the link {broken_link}, "
+            # realpath, unlike Path.resolve, follows a chain of links without raising on a loop.
+            f"which links to {os.path.realpath(broken_link)}, which doesn't exist; "
+            "connect the drive it is on or change data_folder"
         )
     try:
         DataFolder(folder).create()
