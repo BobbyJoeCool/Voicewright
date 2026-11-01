@@ -55,9 +55,8 @@ def port_number(text: str) -> int:
 
 
 def open_when_started(server: uvicorn.Server, url: str) -> None:
+    # A daemon thread: if the server never starts, it ends with the process.
     while not server.started:
-        if server.should_exit:
-            return
         time.sleep(0.1)
     print(f"Voicewright is running at {url}", flush=True)
     webbrowser.open(url)
