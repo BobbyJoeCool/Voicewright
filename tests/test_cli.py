@@ -288,3 +288,49 @@ def test_a_data_folder_under_a_locked_folder_is_reported(launch_with_data_folder
     app = launch_with_data_folder(data_folder)
 
     assert_fails_with_a_plain_message(app, str(data_folder), "Permission denied")
+
+
+def test_a_port_taken_by_a_program_that_does_not_speak_http_is_reported(run_voicewright):
+    with socket.socket() as other_program:
+        other_program.bind(("127.0.0.1", 0))
+        other_program.listen()
+        port = other_program.getsockname()[1]
+
+        def greet_like_ssh():
+            connection, _ = other_program.accept()
+            with connection:
+                connection.sendall(b"SSH-2.0-OpenSSH_9.0\r\n")
+                connection.recv(1024)
+
+        threading.Thread(target=greet_like_ssh, daemon=True).start()
+
+        app = run_voicewright("--port", str(port))
+
+        assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
+
+
+def test_a_port_taken_by_a_server_that_never_stops_answering_is_reported(run_voicewright):
+    class EndlessStream(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            try:
+                while True:
+                    self.wfile.write(b"data: tick\n\n" * 100)
+                    self.wfile.flush()
+                    time.sleep(0.2)
+            except OSError:
+                pass
+
+        def log_message(self, *args):
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), EndlessStream) as other:
+        other.daemon_threads = True
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        port = other.server_address[1]
+
+        app = run_voicewright("--port", str(port))
+
+        assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
+        other.shutdown()

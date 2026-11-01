@@ -2,6 +2,7 @@
 
 import argparse
 import enum
+import http.client
 import sys
 import threading
 import time
@@ -81,16 +82,38 @@ def whats_on(url: str) -> PortHolder:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(url, timeout=2) as response:
-            is_voicewright = b"<title>Voicewright</title>" in response.read()
-            return PortHolder.VOICEWRIGHT if is_voicewright else PortHolder.OTHER_PROGRAM
+            return (
+                PortHolder.VOICEWRIGHT
+                if has_voicewright_title(response)
+                else PortHolder.OTHER_PROGRAM
+            )
     except urllib.error.URLError as error:
         # Refused means nothing listens. Any other failure to connect, or an HTTP error, means
         # a program holds the port, including one listening on every address.
         refused = isinstance(error.reason, ConnectionRefusedError)
         return PortHolder.NOTHING if refused else PortHolder.OTHER_PROGRAM
-    except OSError:
-        # A program accepted the connection but never answered in time, or dropped it.
+    except (OSError, http.client.HTTPException):
+        # A program accepted the connection but never answered in time, dropped it, or
+        # answered with something other than HTTP (an SSH or database banner).
         return PortHolder.OTHER_PROGRAM
+
+
+def has_voicewright_title(response) -> bool:
+    """Whether the page's opening bytes carry Voicewright's title.
+
+    Reads for at most about two seconds: some servers stream forever, and the title is near the
+    top of the page anyway.
+    """
+    deadline = time.monotonic() + 2
+    start = b""
+    while len(start) < 64 * 1024 and time.monotonic() < deadline:
+        chunk = response.read1(4096)
+        if not chunk:
+            break
+        start += chunk
+        if b"<title>Voicewright</title>" in start:
+            return True
+    return False
 
 
 def open_when_started(server: uvicorn.Server, url: str) -> None:
