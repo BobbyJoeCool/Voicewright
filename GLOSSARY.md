@@ -61,6 +61,10 @@ _Avoid_: SFX folder, sound bank
 The finished audio file produced from one Script. Temporary unless saved.
 _Avoid_: Render, result, clip
 
+**Output cache**:
+The last few Outputs (a setting from 5 to 10), kept temporarily; the oldest is removed when it is full, and the cache is cleared on startup.
+_Avoid_: Temp folder, history
+
 **Saved output**:
 An Output the user chose to keep, stored with a record of the Script, Voice, preset values, and sound credits that produced it.
 _Avoid_: Export
