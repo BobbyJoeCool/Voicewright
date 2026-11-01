@@ -6,8 +6,13 @@ import socket
 import subprocess
 import sys
 import threading
+import time
+from pathlib import Path
 
 import pytest
+
+# The installed console script, so a broken [project.scripts] entry fails these tests.
+VOICEWRIGHT = Path(sys.executable).parent / "voicewright"
 
 
 def free_port() -> int:
@@ -27,15 +32,24 @@ def first_stdout_line(app: subprocess.Popen, timeout: float = 10) -> str:
 
 
 @pytest.fixture
-def run_voicewright(tmp_path):
-    """Start the `voicewright` command with a temp HOME and a browser that does nothing."""
-    env = {**os.environ, "HOME": str(tmp_path / "home"), "BROWSER": "true"}
+def browser_log(tmp_path):
+    """Where the stand-in browser records each URL it is asked to open."""
+    return tmp_path / "browser.log"
+
+
+@pytest.fixture
+def run_voicewright(tmp_path, browser_log):
+    """Start the `voicewright` command with a temp HOME and a stand-in browser."""
+    browser = tmp_path / "browser.sh"
+    browser.write_text(f'#!/bin/sh\necho "$1" >> "{browser_log}"\n')
+    browser.chmod(0o755)
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "BROWSER": str(browser)}
 
     started = []
 
     def start(*args):
         app = subprocess.Popen(
-            [sys.executable, "-m", "voicewright.cli", *args],
+            [str(VOICEWRIGHT), *args],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -53,9 +67,30 @@ def run_voicewright(tmp_path):
             app.communicate()
 
 
+def start_running(run_voicewright, *args):
+    """Start the app on a free port; retry if another process takes the port first."""
+    for _ in range(3):
+        port = free_port()
+        app = run_voicewright(*args, "--port", str(port))
+        if "Voicewright is running at" in first_stdout_line(app):
+            return app, port
+        app.kill()
+        app.communicate()
+    pytest.fail("the app never started")
+
+
+def test_the_command_opens_the_page_in_the_browser(run_voicewright, browser_log):
+    _, port = start_running(run_voicewright)
+
+    deadline = time.monotonic() + 10
+    while not browser_log.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert browser_log.exists(), "the browser was never opened"
+    assert browser_log.read_text().split() == [f"http://127.0.0.1:{port}/"]
+
+
 def test_ctrl_c_stops_the_app_without_a_traceback(run_voicewright):
-    app = run_voicewright("--port", str(free_port()))
-    assert "Voicewright is running at" in first_stdout_line(app)
+    app, _ = start_running(run_voicewright)
 
     app.send_signal(signal.SIGINT)
     _, stderr = app.communicate(timeout=10)
