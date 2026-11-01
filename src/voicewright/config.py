@@ -66,8 +66,9 @@ def load_config(path: Path) -> Config:
 def write_default_config(path: Path) -> None:
     # json.dumps gives a quoted, escaped string that is also a valid TOML basic string.
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Owner-only from the start: the file will hold the Freesound API key.
-    path.touch(mode=0o600)
+    # Owner-only before anything is written, new file or not: it will hold the Freesound API key.
+    path.touch()
+    path.chmod(0o600)
     path.write_text(
         "# Voicewright settings. Keep this file out of git: it can hold your Freesound API key.\n"
         f"data_folder = {json.dumps(str(default_data_folder()))}\n"

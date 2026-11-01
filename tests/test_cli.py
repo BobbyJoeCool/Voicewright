@@ -334,3 +334,36 @@ def test_a_port_taken_by_a_server_that_never_stops_answering_is_reported(run_voi
 
         assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
         other.shutdown()
+
+
+def test_a_port_that_redirects_to_a_running_voicewright_is_not_it(run_voicewright):
+    _, voicewright_port = start_running(run_voicewright)
+
+    class Redirect(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{voicewright_port}/")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Redirect) as other:
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        port = other.server_address[1]
+
+        app = run_voicewright("--port", str(port))
+
+        assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
+        other.shutdown()
+
+
+def test_a_second_launch_with_its_own_config_does_not_open_the_running_app(
+    run_voicewright, write_config, browser_log
+):
+    _, port = start_running(run_voicewright)
+
+    second = run_voicewright("--config", str(write_config()), "--port", str(port))
+
+    assert_fails_with_a_plain_message(second, "already running", "--port")
+    assert wait_for_opens(browser_log, 1) == [f"http://127.0.0.1:{port}/"]

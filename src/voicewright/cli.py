@@ -35,8 +35,8 @@ def main() -> None:
     parser.add_argument(
         "--config",
         type=Path,
-        default=default_config_path(),
-        help="config file to use; created with default settings if missing (default: %(default)s)",
+        help="config file to use; created with default settings if missing "
+        f"(default: {default_config_path()})",
     )
     parser.add_argument(
         "--port",
@@ -48,6 +48,12 @@ def main() -> None:
     url = f"http://{HOST}:{args.port}/"
 
     holder = whats_on(url)
+    if holder is PortHolder.VOICEWRIGHT and args.config is not None:
+        # The running app may use another config; opening it would quietly ignore this one.
+        sys.exit(
+            f"voicewright: Voicewright is already running at {url}, maybe with another config; "
+            "stop it first, or pick another port with --port"
+        )
     if holder is PortHolder.VOICEWRIGHT:
         print(f"Voicewright is already running at {url}", flush=True)
         webbrowser.open(url)
@@ -58,7 +64,7 @@ def main() -> None:
         )
 
     try:
-        app = create_app(args.config)
+        app = create_app(args.config or default_config_path())
     except ConfigError as error:
         sys.exit(f"voicewright: {error}")
     server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=args.port))
@@ -76,10 +82,16 @@ def port_number(text: str) -> int:
     return int(text)
 
 
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 def whats_on(url: str) -> PortHolder:
     """What answers at this local address."""
-    # No proxies: the probe only ever talks to this machine.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    # No proxies and no redirects: the probe only ever talks to this address. A redirect then
+    # surfaces as an HTTP error, which means another program holds the port.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirects())
     try:
         with opener.open(url, timeout=2) as response:
             return (
@@ -111,9 +123,7 @@ def has_voicewright_title(response) -> bool:
         if not chunk:
             break
         start += chunk
-        if b"<title>Voicewright</title>" in start:
-            return True
-    return False
+    return b"<title>Voicewright</title>" in start
 
 
 def open_when_started(server: uvicorn.Server, url: str) -> None:

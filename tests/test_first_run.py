@@ -88,3 +88,14 @@ def test_a_data_folder_can_be_a_link_to_another_drive(start, write_config, tmp_p
     start(write_config(data_folder=str(link)))
 
     assert subfolders(drive) == DATA_SUBFOLDERS
+
+
+def test_a_rewritten_empty_config_is_private_to_the_user(start, config_path, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("")
+    config_path.chmod(0o644)
+
+    start(config_path)
+
+    assert config_path.stat().st_mode & 0o077 == 0, "only the owner may read the API key"
