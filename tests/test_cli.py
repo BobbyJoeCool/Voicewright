@@ -161,3 +161,29 @@ def test_a_port_outside_1_to_65535_is_a_usage_error(run_voicewright, port):
     app = run_voicewright("--port", port)
 
     assert_fails_with_a_plain_message(app, f"{port} is not a port from 1 to 65535", exit_code=2)
+
+
+def test_a_second_launch_opens_the_running_app(run_voicewright, browser_log):
+    _, port = start_running(run_voicewright)
+
+    second = run_voicewright("--port", str(port))
+    try:
+        stdout, _ = second.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        second.kill()
+        stdout, _ = second.communicate()
+
+    assert second.returncode == 0
+    assert "Voicewright is already running at" in stdout
+    assert browser_log.read_text().split() == [f"http://127.0.0.1:{port}/"] * 2
+
+
+def test_a_port_taken_by_another_program_is_reported(run_voicewright):
+    with socket.socket() as other_program:
+        other_program.bind(("127.0.0.1", 0))
+        other_program.listen()
+        port = other_program.getsockname()[1]
+
+        app = run_voicewright("--port", str(port))
+
+        assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
