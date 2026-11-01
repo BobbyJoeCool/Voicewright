@@ -1,3 +1,4 @@
+import json
 import os
 import queue
 import signal
@@ -104,7 +105,7 @@ def test_a_data_folder_that_cannot_be_created_is_reported(run_voicewright, tmp_p
     taken = tmp_path / "taken"
     taken.write_text("a file, not a folder")
     config_path = tmp_path / "config.toml"
-    config_path.write_text(f'data_folder = "{taken}"\n')
+    config_path.write_text(f"data_folder = {json.dumps(str(taken))}\n")
 
     app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
 

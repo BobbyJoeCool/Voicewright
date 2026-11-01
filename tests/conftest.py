@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -28,9 +30,8 @@ def write_config(config_path, data_folder):
     def write(**overrides):
         values = {"data_folder": str(data_folder), "output_cache_size": 5, "freesound_api_key": ""}
         values.update(overrides)
-        lines = []
-        for key, value in values.items():
-            lines.append(f'{key} = "{value}"' if isinstance(value, str) else f"{key} = {value}")
+        # json.dumps quotes and escapes strings the way TOML basic strings expect.
+        lines = [f"{key} = {json.dumps(value)}" for key, value in values.items()]
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text("\n".join(lines) + "\n")
         return config_path
@@ -38,8 +39,24 @@ def write_config(config_path, data_folder):
     return write
 
 
+def run_app(config_path):
+    """Run the app in-process with the given config, as the `voicewright` command would."""
+    return TestClient(create_app(config_path))
+
+
 @pytest.fixture
 def client(write_config):
     """The app running in-process against a fresh temp data folder."""
-    with TestClient(create_app(write_config())) as client:
+    with run_app(write_config()) as client:
         yield client
+
+
+@pytest.fixture
+def start():
+    """Start the app once with the given config and check it serves the page."""
+
+    def start(config_path):
+        with run_app(config_path) as client:
+            assert client.get("/").status_code == 200
+
+    return start

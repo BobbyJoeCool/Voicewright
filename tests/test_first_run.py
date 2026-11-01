@@ -1,10 +1,6 @@
 import tomllib
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
-from voicewright.app import create_app
-
 DATA_SUBFOLDERS = {"voices", "drafts", "sounds", "cache", "saved"}
 
 
@@ -12,12 +8,7 @@ def subfolders(folder: Path) -> set[str]:
     return {p.name for p in folder.iterdir() if p.is_dir()} if folder.exists() else set()
 
 
-def start(config_path):
-    with TestClient(create_app(config_path)) as client:
-        assert client.get("/").status_code == 200
-
-
-def test_first_run_writes_a_config_with_every_setting(config_path, tmp_path, monkeypatch):
+def test_first_run_writes_a_config_with_every_setting(start, config_path, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     start(config_path)
@@ -29,13 +20,13 @@ def test_first_run_writes_a_config_with_every_setting(config_path, tmp_path, mon
     assert config["freesound_api_key"] == ""
 
 
-def test_first_run_creates_the_configured_data_folder(write_config, data_folder):
+def test_first_run_creates_the_configured_data_folder(start, write_config, data_folder):
     start(write_config())
 
     assert subfolders(data_folder) == DATA_SUBFOLDERS
 
 
-def test_first_run_creates_the_default_data_folder(config_path, tmp_path, monkeypatch):
+def test_first_run_creates_the_default_data_folder(start, config_path, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     start(config_path)
@@ -45,7 +36,9 @@ def test_first_run_creates_the_default_data_folder(config_path, tmp_path, monkey
     assert subfolders(default_folder) == DATA_SUBFOLDERS
 
 
-def test_data_folder_under_home_can_be_written_with_a_tilde(write_config, tmp_path, monkeypatch):
+def test_data_folder_under_home_can_be_written_with_a_tilde(
+    start, write_config, tmp_path, monkeypatch
+):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     start(write_config(data_folder="~/Audio/Voicewright"))
@@ -53,7 +46,7 @@ def test_data_folder_under_home_can_be_written_with_a_tilde(write_config, tmp_pa
     assert subfolders(tmp_path / "home" / "Audio" / "Voicewright") == DATA_SUBFOLDERS
 
 
-def test_first_run_config_is_private_to_the_user(config_path, tmp_path, monkeypatch):
+def test_first_run_config_is_private_to_the_user(start, config_path, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     start(config_path)
