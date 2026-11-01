@@ -1,6 +1,7 @@
 """The `voicewright` command: start the local server and open the page in the browser."""
 
 import argparse
+import enum
 import sys
 import threading
 import time
@@ -16,6 +17,14 @@ from voicewright.config import ConfigError, default_config_path
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+
+
+class PortHolder(enum.Enum):
+    """What already answers on the port the app wants."""
+
+    NOTHING = enum.auto()
+    VOICEWRIGHT = enum.auto()
+    OTHER_PROGRAM = enum.auto()
 
 
 def main() -> None:
@@ -38,11 +47,11 @@ def main() -> None:
     url = f"http://{HOST}:{args.port}/"
 
     holder = whats_on(url)
-    if holder == "voicewright":
+    if holder is PortHolder.VOICEWRIGHT:
         print(f"Voicewright is already running at {url}", flush=True)
         webbrowser.open(url)
         return
-    if holder == "other":
+    if holder is PortHolder.OTHER_PROGRAM:
         sys.exit(
             f"voicewright: port {args.port} is in use by another program; pick another with --port"
         )
@@ -66,19 +75,22 @@ def port_number(text: str) -> int:
     return int(text)
 
 
-def whats_on(url: str) -> str:
-    """What answers at this local address: "nothing", "voicewright", or "other"."""
+def whats_on(url: str) -> PortHolder:
+    """What answers at this local address."""
     # No proxies: the probe only ever talks to this machine.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(url, timeout=2) as response:
-            return "voicewright" if b"<title>Voicewright</title>" in response.read() else "other"
+            is_voicewright = b"<title>Voicewright</title>" in response.read()
+            return PortHolder.VOICEWRIGHT if is_voicewright else PortHolder.OTHER_PROGRAM
     except urllib.error.URLError as error:
-        # Refused means nothing listens. Anything else (an HTTP error, a timeout) means a
-        # program accepted the connection, including one listening on every address.
-        return "nothing" if isinstance(error.reason, ConnectionRefusedError) else "other"
+        # Refused means nothing listens. Any other failure to connect, or an HTTP error, means
+        # a program holds the port, including one listening on every address.
+        refused = isinstance(error.reason, ConnectionRefusedError)
+        return PortHolder.NOTHING if refused else PortHolder.OTHER_PROGRAM
     except OSError:
-        return "other"
+        # A program accepted the connection but never answered in time, or dropped it.
+        return PortHolder.OTHER_PROGRAM
 
 
 def open_when_started(server: uvicorn.Server, url: str) -> None:
