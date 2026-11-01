@@ -1,5 +1,4 @@
 import http.server
-import json
 import os
 import queue
 import signal
@@ -68,6 +67,40 @@ def run_voicewright(tmp_path, browser_log):
             app.communicate()
 
 
+@pytest.fixture
+def launch_with_config(run_voicewright):
+    """Start the app with this config file on a free port."""
+    return lambda config_path: run_voicewright(
+        "--config", str(config_path), "--port", str(free_port())
+    )
+
+
+@pytest.fixture
+def launch_with_data_folder(launch_with_config, write_config):
+    """Start the app with a config whose data_folder is this path."""
+    return lambda data_folder: launch_with_config(write_config(data_folder=str(data_folder)))
+
+
+def finish(app: subprocess.Popen) -> tuple[str, str]:
+    """Wait for the app to exit, killing it if it is still running after 10 seconds."""
+    try:
+        return app.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        app.kill()
+        return app.communicate()
+
+
+def wait_for_opens(browser_log, count: int) -> list[str]:
+    """The URLs the browser was asked to open, once there are `count` of them (or 10s pass)."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        opened = browser_log.read_text().split() if browser_log.exists() else []
+        if len(opened) >= count:
+            return opened
+        time.sleep(0.1)
+    return opened
+
+
 def start_running(run_voicewright, *args):
     """Start the app on a free port; retry if another process takes the port first."""
     for _ in range(3):
@@ -83,11 +116,7 @@ def start_running(run_voicewright, *args):
 def test_the_command_opens_the_page_in_the_browser(run_voicewright, browser_log):
     _, port = start_running(run_voicewright)
 
-    deadline = time.monotonic() + 10
-    while not browser_log.exists() and time.monotonic() < deadline:
-        time.sleep(0.1)
-    assert browser_log.exists(), "the browser was never opened"
-    assert browser_log.read_text().split() == [f"http://127.0.0.1:{port}/"]
+    assert wait_for_opens(browser_log, 1) == [f"http://127.0.0.1:{port}/"]
 
 
 def test_ctrl_c_stops_the_app_without_a_traceback(run_voicewright):
@@ -101,11 +130,7 @@ def test_ctrl_c_stops_the_app_without_a_traceback(run_voicewright):
 
 
 def assert_fails_with_a_plain_message(app, *expected_in_message, exit_code=1):
-    try:
-        _, stderr = app.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
-        app.kill()
-        _, stderr = app.communicate()
+    _, stderr = finish(app)
     assert app.returncode == exit_code, "the app should refuse to start"
     assert "Traceback" not in stderr
     for text in expected_in_message:
@@ -125,34 +150,34 @@ def assert_fails_with_a_plain_message(app, *expected_in_message, exit_code=1):
         pytest.param('data_folder = "/tmp/a\\u0000b"\n', id="null-character"),
     ],
 )
-def test_a_bad_config_is_reported_by_file_name(run_voicewright, tmp_path, config_text):
+def test_a_bad_config_is_reported_by_file_name(launch_with_config, tmp_path, config_text):
     config_path = tmp_path / "config.toml"
     if isinstance(config_text, bytes):
         config_path.write_bytes(config_text)
     else:
         config_path.write_text(config_text)
 
-    app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
+    app = launch_with_config(config_path)
 
     assert_fails_with_a_plain_message(app, str(config_path))
 
 
-def test_a_data_folder_that_cannot_be_created_is_reported(run_voicewright, tmp_path):
+def test_a_data_folder_that_cannot_be_created_is_reported(
+    launch_with_data_folder, config_path, tmp_path
+):
     taken = tmp_path / "taken"
     taken.write_text("a file, not a folder")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(f"data_folder = {json.dumps(str(taken))}\n")
 
-    app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
+    app = launch_with_data_folder(taken)
 
     assert_fails_with_a_plain_message(app, str(taken), str(config_path))
 
 
-def test_a_config_path_that_cannot_be_used_is_reported(run_voicewright, tmp_path):
+def test_a_config_path_that_cannot_be_used_is_reported(launch_with_config, tmp_path):
     folder = tmp_path / "a-folder"
     folder.mkdir()
 
-    app = run_voicewright("--config", str(folder), "--port", str(free_port()))
+    app = launch_with_config(folder)
 
     assert_fails_with_a_plain_message(app, str(folder))
 
@@ -168,15 +193,11 @@ def test_a_second_launch_opens_the_running_app(run_voicewright, browser_log):
     _, port = start_running(run_voicewright)
 
     second = run_voicewright("--port", str(port))
-    try:
-        stdout, _ = second.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
-        second.kill()
-        stdout, _ = second.communicate()
+    stdout, _ = finish(second)
 
     assert second.returncode == 0
     assert "Voicewright is already running at" in stdout
-    assert browser_log.read_text().split() == [f"http://127.0.0.1:{port}/"] * 2
+    assert wait_for_opens(browser_log, 2) == [f"http://127.0.0.1:{port}/"] * 2
 
 
 @pytest.mark.parametrize("address", ["127.0.0.1", "0.0.0.0"])
@@ -193,16 +214,14 @@ def test_a_port_taken_by_another_program_is_reported(run_voicewright, address):
 
 @pytest.mark.parametrize("below_the_link", ["", "Voicewright"])
 def test_a_data_folder_linked_to_a_missing_target_is_reported(
-    run_voicewright, tmp_path, below_the_link
+    launch_with_data_folder, tmp_path, below_the_link
 ):
     link = tmp_path / "data-link"
     missing = tmp_path / "unmounted-drive" / "Voicewright"
     link.symlink_to(missing)
     data_folder = link / below_the_link if below_the_link else link
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(f"data_folder = {json.dumps(str(data_folder))}\n")
 
-    app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
+    app = launch_with_data_folder(data_folder)
 
     assert_fails_with_a_plain_message(app, str(link), f"links to {missing}", "doesn't exist")
 
@@ -234,26 +253,20 @@ def test_a_port_taken_by_another_web_server_is_reported(run_voicewright, status,
         other.shutdown()
 
 
-def test_a_data_folder_link_that_loops_is_reported(run_voicewright, tmp_path):
+def test_a_data_folder_link_that_loops_is_reported(launch_with_data_folder, tmp_path):
     link = tmp_path / "data-link"
     link.symlink_to(link)
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(f"data_folder = {json.dumps(str(link))}\n")
-
-    app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
+    app = launch_with_data_folder(link)
 
     assert_fails_with_a_plain_message(app, str(link), "doesn't exist")
 
 
-def test_a_chain_of_links_names_the_final_missing_target(run_voicewright, tmp_path):
+def test_a_chain_of_links_names_the_final_missing_target(launch_with_data_folder, tmp_path):
     missing = tmp_path / "unmounted-drive" / "Voicewright"
     middle = tmp_path / "middle-link"
     middle.symlink_to(missing)
     link = tmp_path / "data-link"
     link.symlink_to(middle)
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(f"data_folder = {json.dumps(str(link))}\n")
-
-    app = run_voicewright("--config", str(config_path), "--port", str(free_port()))
+    app = launch_with_data_folder(link)
 
     assert_fails_with_a_plain_message(app, f"links to {missing}, which doesn't exist")
