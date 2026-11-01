@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voicewright"
+version = "0.1.0"
+description = "Local web app that designs custom voices and turns tagged Scripts into finished audio."
+readme = "README.md"
+# chatterbox-mlx requires >=3.11,<3.13 (docs/design.md, Environment).
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx2>=2.0",
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+voicewright = "voicewright.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+voicewright = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Model spikes are one-off reference scripts, not app code.
+extend-exclude = ["spikes"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
