@@ -10,7 +10,7 @@ from pathlib import Path
 DEFAULT_OUTPUT_CACHE_SIZE = 5
 DEFAULT_FREESOUND_API_KEY = ""
 
-EXAMPLE = 'e.g. data_folder = "~/Voicewright"'
+DATA_FOLDER_EXAMPLE = 'e.g. data_folder = "~/Voicewright"'
 
 
 class ConfigError(Exception):
@@ -44,7 +44,9 @@ def load_config(path: Path) -> Config:
         raise ConfigError(f"{path} is not valid TOML: {error}") from None
     data_folder = values.get("data_folder")
     if not isinstance(data_folder, str):
-        raise ConfigError(f"{path} needs data_folder set to a folder path in quotes, {EXAMPLE}")
+        raise ConfigError(
+            f"{path} needs data_folder set to a folder path in quotes, {DATA_FOLDER_EXAMPLE}"
+        )
     if "\0" in data_folder:
         raise ConfigError(f"{path} has a null character in data_folder; remove it")
     try:
@@ -54,7 +56,9 @@ def load_config(path: Path) -> Config:
             f"{path} sets data_folder under an unknown home folder: {data_folder}"
         ) from None
     if not folder.is_absolute():
-        raise ConfigError(f"{path} needs data_folder to be a full path or start with ~, {EXAMPLE}")
+        raise ConfigError(
+            f"{path} needs data_folder to be a full path or start with ~, {DATA_FOLDER_EXAMPLE}"
+        )
     return Config(data_folder=folder)
 
 
