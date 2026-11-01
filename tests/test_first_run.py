@@ -52,3 +52,28 @@ def test_first_run_config_is_private_to_the_user(start, config_path, tmp_path, m
     start(config_path)
 
     assert config_path.stat().st_mode & 0o077 == 0, "only the owner may read the API key"
+
+
+def test_an_empty_config_left_by_an_interrupted_first_run_is_rewritten(
+    start, config_path, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("\n")
+
+    start(config_path)
+
+    assert set(tomllib.loads(config_path.read_text())) == {
+        "data_folder",
+        "output_cache_size",
+        "freesound_api_key",
+    }
+
+
+def test_a_config_saved_with_a_byte_order_mark_is_read(start, write_config, data_folder):
+    config_path = write_config()
+    config_path.write_bytes(b"\xef\xbb\xbf" + config_path.read_bytes())
+
+    start(config_path)
+
+    assert subfolders(data_folder) == DATA_SUBFOLDERS

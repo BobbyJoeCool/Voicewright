@@ -33,9 +33,10 @@ def default_data_folder() -> Path:
 def load_config(path: Path) -> Config:
     """Read the config file, writing one with default settings on first run."""
     try:
-        if not path.is_file():
+        # An empty file is what an interrupted first run leaves behind: start it over.
+        if not path.is_file() or not path.read_text(encoding="utf-8-sig").strip():
             write_default_config(path)
-        values = tomllib.loads(path.read_text(encoding="utf-8"))
+        values = tomllib.loads(path.read_text(encoding="utf-8-sig"))
     except UnicodeDecodeError:
         raise ConfigError(f"{path} is not saved as UTF-8; save it as UTF-8 and try again") from None
     except OSError as error:
