@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from voicewright.cli import has_voicewright_title
+
 # The installed console script, so a broken [project.scripts] entry fails these tests.
 VOICEWRIGHT = Path(sys.executable).parent / "voicewright"
 
@@ -364,3 +366,25 @@ def test_a_second_launch_with_its_own_config_does_not_open_the_running_app(
 
     assert_fails_with_a_plain_message(second, "already running", "--port")
     assert wait_for_opens(browser_log, 1) == [f"http://127.0.0.1:{port}/"]
+
+
+class PageInChunks:
+    """A response whose body arrives in 4 KiB pieces, as `read1` hands them over."""
+
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def read1(self, size: int) -> bytes:
+        chunk, self.body = self.body[:size], self.body[size:]
+        return chunk
+
+
+@pytest.mark.parametrize(
+    "body, is_voicewright",
+    [
+        pytest.param(b"<title>Voicewright</title>" + b"x" * 100, True, id="title-at-the-top"),
+        pytest.param(b"x" * 70 * 1024 + b"<title>Voicewright</title>", False, id="title-past-64k"),
+    ],
+)
+def test_the_probe_reads_only_the_top_of_a_page(body, is_voicewright):
+    assert has_voicewright_title(PageInChunks(body)) is is_voicewright
