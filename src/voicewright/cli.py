@@ -99,7 +99,8 @@ def is_default_config(path: Path) -> bool:
     try:
         return path.resolve() == default_config_path().resolve()
     except (RuntimeError, OSError):
-        # A link loop or an unreadable folder: it can't be the default, which resolves.
+        # A link loop (RuntimeError), or a working folder that no longer exists: it can't be
+        # the default, which resolves.
         return False
 
 

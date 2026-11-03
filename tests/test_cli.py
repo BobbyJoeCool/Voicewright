@@ -438,18 +438,20 @@ def test_ctrl_c_while_checking_the_port_stops_without_a_traceback(run_voicewrigh
         assert app.returncode == 130
 
 
-@pytest.mark.parametrize("config", ["loop", "~nosuchuser/config.toml"])
-def test_a_second_launch_with_a_config_path_that_cannot_be_followed_is_refused(
-    run_voicewright, tmp_path, config
-):
+def test_a_second_launch_with_a_config_link_that_loops_is_refused(run_voicewright, tmp_path):
     _, port = start_running(run_voicewright)
-    if config == "loop":
-        config = tmp_path / "loop"
-        config.symlink_to(config)
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
 
-    second = run_voicewright("--config", str(config), "--port", str(port))
+    second = run_voicewright("--config", str(loop), "--port", str(port))
 
-    assert_fails_with_a_plain_message(second, "voicewright: ")
+    assert_fails_with_a_plain_message(second, "already running", "--port")
+
+
+def test_a_config_under_an_unknown_home_folder_is_reported(run_voicewright):
+    app = run_voicewright("--config", "~nosuchuser/config.toml", "--port", str(free_port()))
+
+    assert_fails_with_a_plain_message(app, "can't find the home folder", "~nosuchuser")
 
 
 def test_a_config_path_starting_with_a_tilde_is_under_the_home_folder(run_voicewright, tmp_path):
