@@ -457,3 +457,10 @@ def test_a_config_path_starting_with_a_tilde_is_under_the_home_folder(run_voicew
 
     assert (tmp_path / "home" / "custom" / "config.toml").is_file()
     assert not (tmp_path / "~").exists()
+
+
+def test_a_config_path_with_a_folder_named_tilde_stays_in_that_folder(run_voicewright, tmp_path):
+    start_running(run_voicewright, "--config", "./~/config.toml")
+
+    assert (tmp_path / "~" / "config.toml").is_file()
+    assert not (tmp_path / "home" / "config.toml").exists()

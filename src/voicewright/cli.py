@@ -34,7 +34,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        type=Path,
         help="config file to use; created with default settings if missing "
         f"(default: {default_config_path()})",
     )
@@ -47,8 +46,7 @@ def main() -> None:
     args = parser.parse_args()
     url = f"http://{HOST}:{args.port}/"
     try:
-        # Expanded once, so the second-launch check and the app read the same file.
-        config_path = (args.config or default_config_path()).expanduser()
+        config_path = config_file(args.config)
     except RuntimeError:
         sys.exit(f"voicewright: can't find the home folder for --config {args.config}")
 
@@ -83,6 +81,17 @@ def main() -> None:
     except KeyboardInterrupt:
         # uvicorn shuts down cleanly on Ctrl-C, then re-raises it; uvicorn.run() hides it too.
         pass
+
+
+def config_file(text: str | None) -> Path:
+    """The config file `--config` names, with a leading ~ meaning a home folder.
+
+    Decided from the text as typed: pathlib turns "./~/x" into "~/x", which would lose the
+    difference between a folder named ~ and the home folder.
+    """
+    if text is None:
+        return default_config_path()
+    return Path(text).expanduser() if text.startswith("~") else Path(text)
 
 
 def is_default_config(path: Path) -> bool:
