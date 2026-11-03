@@ -38,7 +38,7 @@ Done when: the check reports every problem in one request, a rejected Script sta
 
 ### Phase 5 — Finish v1
 
-Goal: vocal effects if the spike passed, a full offline smoke test, a manual QA pass, and a README demo.
+Goal: a full offline smoke test, a manual QA pass, and a README demo. Vocal effects (5.1) were dropped from v1 after the spike.
 
 Done when: the smoke test passes on the M2 with Wi-Fi off, every user story is checked with bugs filed, and the README opens with the demo.
 
@@ -65,7 +65,7 @@ Done when: the smoke test passes on the M2 with Wi-Fi off, every user story is c
 | 4.3 | #18 | Output cache and cache setting | `ready-for-agent` | #17 |
 | 4.4 | #19 | Save Outputs with sidecar records | `ready-for-agent` | #18, #14 |
 | 4.5 | #20 | Scripts area of the page | `ready-for-agent` | #19, #12 |
-| 5.1 | #21 | Chatterbox Turbo vocal effects (only if 0.2 passed) | `ready-for-agent` | #2, #17 |
+| 5.1 | #21 | ~~Chatterbox Turbo vocal effects~~ (closed: dropped from v1 in 0.2) | `wontfix` | — |
 | 5.2 | #22 | Full real-model smoke test | `ready-for-human` | #19 |
 | 5.3 | #23 | Manual QA pass of the page | `ready-for-human` | #20 |
 | 5.4 | #24 | README demo | `ready-for-agent` | #22 |

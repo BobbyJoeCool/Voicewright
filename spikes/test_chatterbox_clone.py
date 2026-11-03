@@ -12,7 +12,8 @@ source = sys.argv[1] if len(sys.argv) > 1 else "voxcpm"
 ref = out(f"{source}_neutral.wav")
 need(ref)
 with Timer("load model"):
-    model = ChatterboxTTSMLX.from_pretrained(device="hybrid-mlx")
+    # ChatterboxTTSMLX is the hybrid backend (T3 in MLX, S3Gen in PyTorch); device is the PyTorch side
+    model = ChatterboxTTSMLX.from_pretrained(device="mps")
 
 for emo, (line, exaggeration, cfg) in EMOTIONS.items():
     name = f"chatterbox_from_{source}_{emo}.wav"

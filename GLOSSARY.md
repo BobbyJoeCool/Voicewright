@@ -23,7 +23,7 @@ The list of emotions every new Voice starts with.
 _Avoid_: Starter emotions, base emotions
 
 **Reference clip**:
-The audio file a Voice or Emotion preset is cloned from. The neutral reference clip defines the Voice's identity.
+The audio file the speech engine clones from when speaking as a Voice in one emotion. Each Emotion preset has its own, designed from the Voice's description; the neutral reference clip is the take the user accepted as the Voice's identity.
 _Avoid_: Sample, voice (for the file)
 
 **Character**:

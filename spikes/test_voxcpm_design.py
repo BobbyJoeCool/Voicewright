@@ -19,8 +19,9 @@ sr = model.tts_model.sample_rate
 
 
 def gen(name, text, **kw):
+    torch.manual_seed(42)  # voxcpm 2.0.3's generate() takes no seed argument
     with Timer(name) as t:
-        wav = model.generate(text=text, cfg_value=2.0, inference_timesteps=10, seed=42, **kw)
+        wav = model.generate(text=text, cfg_value=2.0, inference_timesteps=10, **kw)
     sf.write(out(name), wav, sr)
     report(name, t.s, len(wav) / sr)
 
