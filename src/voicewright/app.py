@@ -2,14 +2,19 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, ConfigDict
 from starlette.background import BackgroundTask
 
 from voicewright.audio_converter import SUPPORTED, FfmpegMissing, UnsupportedAudio, convert
 from voicewright.config import ConfigError, load_config
 from voicewright.data_folder import DataFolder, MissingLinkTarget
+from voicewright.engines import Engines, default_engines
+from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
+from voicewright.model_manager import ModelManager
 
 STATIC_FOLDER = Path(__file__).parent / "static"
 HOME_PAGE = STATIC_FOLDER / "index.html"
@@ -23,7 +28,29 @@ def page_title() -> bytes:
     return title.group()
 
 
-def create_app(config_path: Path) -> FastAPI:
+class ProgressOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    step: int
+    total: int | None
+    message: str
+
+
+class JobOut(BaseModel):
+    """A job as the page sees it: read from a Job."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: str
+    state: JobState
+    progress: ProgressOut
+    result: Any = None
+    error: str | None = None
+
+
+def create_app(config_path: Path, engines: Engines | None = None) -> FastAPI:
+    """The app, on the given engines (the real ones unless a test passes fakes)."""
     config = load_config(config_path)
     folder = config.data_folder
     try:
@@ -40,6 +67,41 @@ def create_app(config_path: Path) -> FastAPI:
         ) from None
 
     app = FastAPI(title="Voicewright")
+    jobs = JobRunner()
+    app.state.jobs = jobs
+    app.state.models = ModelManager(engines or default_engines())
+
+    @app.exception_handler(JobAlreadyRunning)
+    def job_already_running(request: Request, error: JobAlreadyRunning) -> JSONResponse:
+        running = error.running
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": f"A {running.kind} job is already running; wait for it to finish",
+                "running_job_id": running.id,
+            },
+        )
+
+    def find_job(job_id: str) -> Job:
+        job = jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, f"no job {job_id}; it may have finished long ago")
+        return job
+
+    @app.get("/jobs/{job_id}")
+    def job_status(job_id: str) -> JobOut:
+        """A job's state and progress, and its result or error once it has finished."""
+        return JobOut.model_validate(find_job(job_id))
+
+    @app.get("/jobs/{job_id}/result")
+    def job_result(job_id: str) -> Any:
+        """A finished job's result."""
+        job = find_job(job_id)
+        if job.state is JobState.RUNNING:
+            raise HTTPException(409, f"the {job.kind} job is still running")
+        if job.state is JobState.FAILED:
+            raise HTTPException(409, f"the {job.kind} job has no result: {job.error}")
+        return job.result
 
     @app.get("/", include_in_schema=False)
     def home() -> FileResponse:

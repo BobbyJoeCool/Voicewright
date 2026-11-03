@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from fakes import FakeEngines
 from fastapi.testclient import TestClient
 
 from voicewright.app import create_app
@@ -39,15 +40,24 @@ def write_config(config_path, data_folder):
     return write
 
 
-def run_app(config_path):
-    """The FastAPI app built from this config, run in-process (no server, no port)."""
-    return TestClient(create_app(config_path))
+def run_app(config_path, fakes: FakeEngines | None = None):
+    """The FastAPI app built from this config, run in-process (no server, no port).
+
+    Always on fake engines: no test loads a real model.
+    """
+    return TestClient(create_app(config_path, (fakes or FakeEngines()).engines()))
 
 
 @pytest.fixture
-def client(write_config):
-    """The app running in-process against a fresh temp data folder."""
-    with run_app(write_config()) as client:
+def fakes():
+    """The fake engines the `client` app runs on: what they were asked, and how to fail them."""
+    return FakeEngines()
+
+
+@pytest.fixture
+def client(write_config, fakes):
+    """The app running in-process against a fresh temp data folder, on fake engines."""
+    with run_app(write_config(), fakes) as client:
         yield client
 
 
