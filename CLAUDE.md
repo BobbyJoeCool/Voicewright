@@ -10,10 +10,8 @@
   `phase-N.md`; don't keep appending to the old one.
 - Within a phase file, append entries; don't overwrite. Structure:
   - `# Phase N — <Phase name> Log`
-  - `## Phase N.M — <Step name> (#<issue>)` for each step within the phase, naming the
-    GitHub issue the step implements
-  - `### Session N.M — YYYY-MM-DD` for each working session on that step, followed by an
-    `**Issue:** #<issue>` line naming the issue that session worked on (or `none` and why)
+  - `## Phase N.M — <Step name>` for each step within the phase
+  - `### Session N.M — YYYY-MM-DD` for each working session on that step
   - A **Files created or modified** table (`| File | What it does |`), one row per file touched
   - Optional **Packages installed** and **Implementation notes** subsections when relevant
 
