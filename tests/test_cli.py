@@ -480,17 +480,19 @@ def test_a_bad_config_in_a_folder_named_tilde_is_reported_by_its_real_path(
     assert_fails_with_a_plain_message(app, f"{config} is not valid TOML")
 
 
+@pytest.mark.parametrize("already_running", [False, True], ids=["first-launch", "second-launch"])
 def test_a_relative_config_from_a_deleted_working_folder_is_reported(
-    run_voicewright, tmp_path, monkeypatch
+    run_voicewright, tmp_path, monkeypatch, already_running
 ):
+    port = start_running(run_voicewright)[1] if already_running else free_port()
     gone = tmp_path / "gone"
     gone.mkdir()
     monkeypatch.chdir(gone)
     gone.rmdir()
 
-    app = run_voicewright("--config", "config.toml", "--port", str(free_port()))
+    app = run_voicewright("--config", "config.toml", "--port", str(port))
 
-    assert_fails_with_a_plain_message(app, "config.toml")
+    assert_fails_with_a_plain_message(app, "already running" if already_running else "config.toml")
 
 
 def test_a_config_reached_through_a_missing_folder_is_not_overwritten(launch_with_config, tmp_path):

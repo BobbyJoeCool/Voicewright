@@ -68,6 +68,7 @@ def load_config(path: Path) -> Config:
 
 
 def write_default_config(path: Path) -> None:
+    """Write the default settings to this file; its folder must already exist."""
     # json.dumps gives a quoted, escaped string that is also a valid TOML basic string.
     # Owner-only before anything is written, new file or not: it will hold the Freesound API key.
     # Opening first means a folder at this path fails here, before its mode could be changed.
