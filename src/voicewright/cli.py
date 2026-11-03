@@ -48,7 +48,11 @@ def main() -> None:
     url = f"http://{HOST}:{args.port}/"
     config_path = args.config or default_config_path()
 
-    holder = whats_on(url)
+    try:
+        holder = whats_on(url)
+    except KeyboardInterrupt:
+        # Ctrl-C while waiting on whatever holds the port: stop quietly, as a shell would.
+        sys.exit(130)
     if holder is PortHolder.VOICEWRIGHT and not is_default_config(config_path):
         # The running app may use another config; opening it would quietly ignore this one.
         sys.exit(

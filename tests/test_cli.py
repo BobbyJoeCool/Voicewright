@@ -402,3 +402,27 @@ def test_a_second_launch_naming_the_default_config_opens_the_running_app(
     assert second.returncode == 0
     assert "Voicewright is already running at" in stdout
     assert wait_for_opens(browser_log, 2) == [f"http://127.0.0.1:{port}/"] * 2
+
+
+def test_ctrl_c_while_checking_the_port_stops_without_a_traceback(run_voicewright):
+    with socket.socket() as silent_program:
+        silent_program.bind(("127.0.0.1", 0))
+        silent_program.listen()
+        port = silent_program.getsockname()[1]
+        connected = threading.Event()
+
+        def accept_and_say_nothing():
+            connection, _ = silent_program.accept()
+            connected.set()
+            time.sleep(10)
+            connection.close()
+
+        threading.Thread(target=accept_and_say_nothing, daemon=True).start()
+
+        app = run_voicewright("--port", str(port))
+        assert connected.wait(timeout=10), "the app never checked the port"
+        app.send_signal(signal.SIGINT)
+        _, stderr = finish(app)
+
+        assert "Traceback" not in stderr
+        assert app.returncode == 130
