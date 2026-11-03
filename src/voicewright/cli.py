@@ -46,7 +46,11 @@ def main() -> None:
     )
     args = parser.parse_args()
     url = f"http://{HOST}:{args.port}/"
-    config_path = args.config or default_config_path()
+    try:
+        # Expanded once, so the second-launch check and the app read the same file.
+        config_path = (args.config or default_config_path()).expanduser()
+    except RuntimeError:
+        sys.exit(f"voicewright: can't find the home folder for --config {args.config}")
 
     try:
         holder = whats_on(url)
@@ -83,7 +87,11 @@ def main() -> None:
 
 def is_default_config(path: Path) -> bool:
     """Whether this is the config a plain `voicewright` uses, however the path is written."""
-    return path.expanduser().resolve() == default_config_path().resolve()
+    try:
+        return path.resolve() == default_config_path().resolve()
+    except (RuntimeError, OSError):
+        # A link loop or an unreadable folder: it can't be the default, which resolves.
+        return False
 
 
 def port_number(text: str) -> int:

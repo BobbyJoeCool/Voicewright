@@ -391,13 +391,21 @@ def test_the_probe_reads_only_the_top_of_a_page(body, is_voicewright):
     assert has_voicewright_title(PageInChunks(body)) is is_voicewright
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        pytest.param("{home}/.config/voicewright/config.toml", id="full-path"),
+        pytest.param("{home}/.config/voicewright/../voicewright/config.toml", id="with-dot-dot"),
+        pytest.param("~/.config/voicewright/config.toml", id="with-tilde"),
+    ],
+)
 def test_a_second_launch_naming_the_default_config_opens_the_running_app(
-    run_voicewright, tmp_path, browser_log
+    run_voicewright, tmp_path, browser_log, spelling
 ):
     _, port = start_running(run_voicewright)
-    default_config = tmp_path / "home" / ".config" / "voicewright" / "config.toml"
+    default_config = spelling.format(home=tmp_path / "home")
 
-    second = run_voicewright("--config", str(default_config), "--port", str(port))
+    second = run_voicewright("--config", default_config, "--port", str(port))
     stdout, _ = finish(second)
 
     assert second.returncode == 0
@@ -428,3 +436,24 @@ def test_ctrl_c_while_checking_the_port_stops_without_a_traceback(run_voicewrigh
 
         assert "Traceback" not in stderr
         assert app.returncode == 130
+
+
+@pytest.mark.parametrize("config", ["loop", "~nosuchuser/config.toml"])
+def test_a_second_launch_with_a_config_path_that_cannot_be_followed_is_refused(
+    run_voicewright, tmp_path, config
+):
+    _, port = start_running(run_voicewright)
+    if config == "loop":
+        config = tmp_path / "loop"
+        config.symlink_to(config)
+
+    second = run_voicewright("--config", str(config), "--port", str(port))
+
+    assert_fails_with_a_plain_message(second, "voicewright: ")
+
+
+def test_a_config_path_starting_with_a_tilde_is_under_the_home_folder(run_voicewright, tmp_path):
+    start_running(run_voicewright, "--config", "~/custom/config.toml")
+
+    assert (tmp_path / "home" / "custom" / "config.toml").is_file()
+    assert not (tmp_path / "~").exists()
