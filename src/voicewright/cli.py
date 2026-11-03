@@ -91,7 +91,8 @@ def config_file(text: str | None) -> Path:
     """
     if text is None:
         return default_config_path()
-    return Path(text).expanduser() if text.startswith("~") else Path(text)
+    # Absolute, so messages name the real file: "./~/x" would otherwise print as "~/x".
+    return Path(text).expanduser() if text.startswith("~") else Path(text).absolute()
 
 
 def is_default_config(path: Path) -> bool:

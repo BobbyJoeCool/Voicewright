@@ -466,3 +466,15 @@ def test_a_config_path_with_a_folder_named_tilde_stays_in_that_folder(run_voicew
 
     assert (tmp_path / "~" / "config.toml").is_file()
     assert not (tmp_path / "home" / "config.toml").exists()
+
+
+def test_a_bad_config_in_a_folder_named_tilde_is_reported_by_its_real_path(
+    run_voicewright, tmp_path
+):
+    config = tmp_path / "~" / "config.toml"
+    config.parent.mkdir()
+    config.write_text("data_folder = /no/quotes\n")
+
+    app = run_voicewright("--config", "./~/config.toml", "--port", str(free_port()))
+
+    assert_fails_with_a_plain_message(app, f"{config} is not valid TOML")
