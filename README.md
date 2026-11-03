@@ -9,7 +9,7 @@ Needs macOS with Python 3.11 or 3.12 (3.13 and newer won't work with the speech 
 2. `python3.11 -m venv .venv && .venv/bin/pip install -e '.[dev]'`
 3. `.venv/bin/voicewright`
 
-The last step starts the app at <http://127.0.0.1:8765/> and opens it in your browser. Running it again while it's up just opens the page. Use `--port` to pick another port.
+The last step starts the app at <http://127.0.0.1:8765/> and opens it in your browser. Running it again while it's up just opens the page, unless `--config` names a different config file. Use `--port` to pick another port.
 
 ### Settings and data
 

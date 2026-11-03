@@ -388,3 +388,17 @@ class PageInChunks:
 )
 def test_the_probe_reads_only_the_top_of_a_page(body, is_voicewright):
     assert has_voicewright_title(PageInChunks(body)) is is_voicewright
+
+
+def test_a_second_launch_naming_the_default_config_opens_the_running_app(
+    run_voicewright, tmp_path, browser_log
+):
+    _, port = start_running(run_voicewright)
+    default_config = tmp_path / "home" / ".config" / "voicewright" / "config.toml"
+
+    second = run_voicewright("--config", str(default_config), "--port", str(port))
+    stdout, _ = finish(second)
+
+    assert second.returncode == 0
+    assert "Voicewright is already running at" in stdout
+    assert wait_for_opens(browser_log, 2) == [f"http://127.0.0.1:{port}/"] * 2

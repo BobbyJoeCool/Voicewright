@@ -46,9 +46,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     url = f"http://{HOST}:{args.port}/"
+    config_path = args.config or default_config_path()
 
     holder = whats_on(url)
-    if holder is PortHolder.VOICEWRIGHT and args.config is not None:
+    if holder is PortHolder.VOICEWRIGHT and not is_default_config(config_path):
         # The running app may use another config; opening it would quietly ignore this one.
         sys.exit(
             f"voicewright: Voicewright is already running at {url}, maybe with another config; "
@@ -64,7 +65,7 @@ def main() -> None:
         )
 
     try:
-        app = create_app(args.config or default_config_path())
+        app = create_app(config_path)
     except ConfigError as error:
         sys.exit(f"voicewright: {error}")
     server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=args.port))
@@ -74,6 +75,11 @@ def main() -> None:
     except KeyboardInterrupt:
         # uvicorn shuts down cleanly on Ctrl-C, then re-raises it; uvicorn.run() hides it too.
         pass
+
+
+def is_default_config(path: Path) -> bool:
+    """Whether this is the config a plain `voicewright` uses, however the path is written."""
+    return path.expanduser().resolve() == default_config_path().resolve()
 
 
 def port_number(text: str) -> int:
