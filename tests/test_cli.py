@@ -1,3 +1,4 @@
+import contextlib
 import http.server
 import os
 import queue
@@ -99,6 +100,23 @@ def wait_for_opens(browser_log, count: int) -> list[str]:
             return opened
         time.sleep(0.1)
     return opened
+
+
+@contextlib.contextmanager
+def serving(handler: type[http.server.BaseHTTPRequestHandler]):
+    """Serve this handler on a free local port, quietly; yield the port, then shut it down."""
+
+    class Quiet(handler):
+        def log_message(self, *args):
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Quiet) as server:
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            yield server.server_address[1]
+        finally:
+            server.shutdown()
 
 
 def start_running(run_voicewright, *args):
@@ -240,17 +258,10 @@ def test_a_port_taken_by_another_web_server_is_reported(run_voicewright, status,
             self.end_headers()
             self.wfile.write(page)
 
-        def log_message(self, *args):
-            pass
-
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), OtherWebServer) as other:
-        threading.Thread(target=other.serve_forever, daemon=True).start()
-        port = other.server_address[1]
-
+    with serving(OtherWebServer) as port:
         app = run_voicewright("--port", str(port))
 
         assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
-        other.shutdown()
 
 
 def test_a_data_folder_link_that_loops_is_reported(launch_with_data_folder, tmp_path):
@@ -322,18 +333,10 @@ def test_a_port_taken_by_a_server_that_never_stops_answering_is_reported(run_voi
             except OSError:
                 pass
 
-        def log_message(self, *args):
-            pass
-
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), EndlessStream) as other:
-        other.daemon_threads = True
-        threading.Thread(target=other.serve_forever, daemon=True).start()
-        port = other.server_address[1]
-
+    with serving(EndlessStream) as port:
         app = run_voicewright("--port", str(port))
 
         assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
-        other.shutdown()
 
 
 def test_a_port_that_redirects_to_a_running_voicewright_is_not_it(run_voicewright):
@@ -345,17 +348,10 @@ def test_a_port_that_redirects_to_a_running_voicewright_is_not_it(run_voicewrigh
             self.send_header("Location", f"http://127.0.0.1:{voicewright_port}/")
             self.end_headers()
 
-        def log_message(self, *args):
-            pass
-
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Redirect) as other:
-        threading.Thread(target=other.serve_forever, daemon=True).start()
-        port = other.server_address[1]
-
+    with serving(Redirect) as port:
         app = run_voicewright("--port", str(port))
 
         assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
-        other.shutdown()
 
 
 def test_a_second_launch_with_its_own_config_does_not_open_the_running_app(
