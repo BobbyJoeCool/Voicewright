@@ -150,6 +150,7 @@ vite.config.ts.timestamp-*
 
 # ---------- Personal / working notes (not part of the project deliverable) ----------
 DevNotes/
+CLAUDE.md
 
 # ---------- Model spikes ----------
 spikes/.venvs/
