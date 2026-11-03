@@ -11,6 +11,11 @@ readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "fastapi>=0.162",
+    # Audio converter: ffmpeg through pydub (docs/design.md section 1). ffmpeg itself comes
+    # from Homebrew. pydub needs audioop, which Python 3.13 removes; requires-python stops at 3.12.
+    "pydub>=0.25.1",
+    # FastAPI needs it to receive uploaded files.
+    "python-multipart>=0.0.33",
     "uvicorn>=0.54",
 ]
 
@@ -32,6 +37,10 @@ voicewright = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # pydub imports audioop; harmless on the 3.11 and 3.12 this project supports.
+    "ignore:'audioop' is deprecated:DeprecationWarning:pydub",
+]
 
 [tool.ruff]
 line-length = 100

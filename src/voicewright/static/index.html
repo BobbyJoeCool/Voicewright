@@ -4,9 +4,78 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Voicewright</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    section { border: 1px solid #ccc; border-radius: 6px; padding: 1rem; margin-top: 1.5rem; }
+    h2 { margin-top: 0; }
+    #convert-error { color: #b00020; }
+    #convert-result[hidden], #convert-error[hidden] { display: none; }
+    audio { display: block; margin: 0.75rem 0; width: 100%; }
+  </style>
 </head>
 <body>
   <h1>Voicewright</h1>
   <p>Voices, Sounds, and Scripts are coming soon.</p>
+
+  <section aria-labelledby="convert-heading">
+    <h2 id="convert-heading">Convert</h2>
+    <p>Turn an audio or video file (MP3, M4A, FLAC, OGG, AAC, WAV, or a video with sound)
+      into a standard WAV: 16-bit, mono.</p>
+    <form id="convert-form">
+      <input type="file" name="file" id="convert-file" accept="audio/*,video/*" required>
+      <button type="submit" id="convert-button">Convert</button>
+    </form>
+    <p id="convert-status" role="status"></p>
+    <p id="convert-error" role="alert" hidden></p>
+    <div id="convert-result" hidden>
+      <audio id="convert-player" controls></audio>
+      <a id="convert-download" href="#">Download WAV</a>
+    </div>
+  </section>
+
+  <script>
+    const form = document.getElementById("convert-form");
+    const button = document.getElementById("convert-button");
+    const status = document.getElementById("convert-status");
+    const error = document.getElementById("convert-error");
+    const result = document.getElementById("convert-result");
+    const player = document.getElementById("convert-player");
+    const download = document.getElementById("convert-download");
+    let lastUrl = null;
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const file = document.getElementById("convert-file").files[0];
+      if (!file) return;
+      button.disabled = true;
+      error.hidden = true;
+      result.hidden = true;
+      status.textContent = `Converting ${file.name}…`;
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        const response = await fetch("/convert", { method: "POST", body });
+        if (!response.ok) {
+          const problem = await response.json().catch(() => null);
+          throw new Error(problem?.detail ?? `Conversion failed (HTTP ${response.status})`);
+        }
+        if (lastUrl) URL.revokeObjectURL(lastUrl);
+        lastUrl = URL.createObjectURL(await response.blob());
+        player.src = lastUrl;
+        download.href = lastUrl;
+        download.download = file.name.replace(/\.[^.]*$/, "") + ".wav";
+        status.textContent = `Converted ${file.name}.`;
+        result.hidden = false;
+      } catch (problem) {
+        status.textContent = "";
+        error.textContent = problem.message === "Failed to fetch"
+          ? "Can't reach Voicewright; is it still running?"
+          : problem.message;
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
 </body>
 </html>

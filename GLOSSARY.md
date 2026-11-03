@@ -69,6 +69,12 @@ _Avoid_: Temp folder, history
 An Output the user chose to keep, stored with a record of the Script, Voice, preset values, and sound credits that produced it.
 _Avoid_: Export
 
+### Audio
+
+**Standard WAV**:
+The one audio format the app keeps and assembles: 16-bit PCM WAV, mono, at the source's own sample rate. The Audio converter turns any supported audio or video file into it.
+_Avoid_: Normalized audio, clean WAV
+
 ## Relationships
 
 - A **Voice** has one neutral **Reference clip** and many **Emotion presets**
