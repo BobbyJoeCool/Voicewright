@@ -5,11 +5,15 @@
 
 Needs macOS with Python 3.11 or 3.12 (3.13 and newer won't work with the speech model).
 
-1. `brew install python@3.11`
+1. `brew install python@3.11 ffmpeg`
 2. `python3.11 -m venv .venv && .venv/bin/pip install -e '.[dev]'`
 3. `.venv/bin/voicewright`
 
 The last step starts the app at <http://127.0.0.1:8765/> and opens it in your browser. Running it again while it's up just opens the page, unless `--config` names a config file other than the default one. Use `--port` to pick another port.
+
+### Convert a file
+
+The Convert panel on the page turns an audio or video file (MP3, M4A, FLAC, OGG, AAC, WAV, or a video with sound) into the app's standard WAV, 16-bit mono, and lets you play or download it. The same conversion is `POST /convert` with the file as a form upload named `file`.
 
 ### Settings and data
 
