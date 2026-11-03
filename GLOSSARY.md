@@ -75,6 +75,12 @@ _Avoid_: Export
 The one audio format the app keeps and assembles: 16-bit PCM WAV, mono, at the source's own sample rate. The Audio converter turns any supported audio or video file into it.
 _Avoid_: Normalized audio, clean WAV
 
+### Running
+
+**Job**:
+One long operation (designing a Voice, generating presets, generating a Script) running in the background. Only one runs at a time; the page follows its progress and reads its result or error.
+_Avoid_: Task, run, request
+
 ## Relationships
 
 - A **Voice** has one neutral **Reference clip** and many **Emotion presets**
