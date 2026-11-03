@@ -195,7 +195,8 @@ def test_a_data_folder_that_cannot_be_created_is_reported(
 
 def test_a_config_path_that_cannot_be_used_is_reported(launch_with_config, tmp_path):
     folder = tmp_path / "a-folder"
-    folder.mkdir(mode=0o755)
+    folder.mkdir()
+    folder.chmod(0o755)  # set outright: mkdir's mode is cut down by the umask
 
     app = launch_with_config(folder)
 
@@ -369,7 +370,7 @@ def test_a_second_launch_with_its_own_config_does_not_open_the_running_app(
 
 
 class PageInChunks:
-    """A response whose body arrives in 4 KiB pieces, as `read1` hands them over."""
+    """A response whose body arrives in whatever pieces `read1` asks for."""
 
     def __init__(self, body: bytes):
         self.body = body
@@ -421,6 +422,7 @@ def test_ctrl_c_while_checking_the_port_stops_without_a_traceback(run_voicewrigh
 
         app = run_voicewright("--port", str(port))
         assert connected.wait(timeout=10), "the app never checked the port"
+        # The probe waits up to 2 seconds on this silent connection; Ctrl-C lands well inside.
         app.send_signal(signal.SIGINT)
         _, stderr = finish(app)
 
