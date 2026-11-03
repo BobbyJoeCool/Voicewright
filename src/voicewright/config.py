@@ -23,6 +23,15 @@ class Config:
     data_folder: Path
 
 
+def expand_home(text: str) -> Path:
+    """This path as typed, with a leading ~ meaning a home folder. Raises RuntimeError if unknown.
+
+    Decided from the text: pathlib turns "./~/x" into "~/x", which would lose the difference
+    between a folder named ~ and the home folder.
+    """
+    return Path(text).expanduser() if text.startswith("~") else Path(text)
+
+
 def default_config_path() -> Path:
     return Path.home() / ".config" / "voicewright" / "config.toml"
 
@@ -34,13 +43,15 @@ def default_data_folder() -> Path:
 def load_config(path: Path) -> Config:
     """Read the config file, writing one with default settings on first run."""
     try:
-        # Folder first, then the check: "missing/../config.toml" names an existing file only
-        # once "missing" exists, and must not be overwritten as if it were new.
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # Follow the folder to where it really is before creating anything: "missing/../x.toml"
+        # names an existing x.toml, which must not be overwritten as if it were new, and needs
+        # no "missing" folder. Only the folder: a config that is a link stays a link.
+        real = Path(os.path.realpath(path.parent)) / path.name
+        real.parent.mkdir(parents=True, exist_ok=True)
         # An empty file is what an interrupted first run leaves behind: start it over.
-        if not path.is_file() or not path.read_text(encoding="utf-8-sig").strip():
-            write_default_config(path)
-        values = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+        if not real.is_file() or not real.read_text(encoding="utf-8-sig").strip():
+            write_default_config(real)
+        values = tomllib.loads(real.read_text(encoding="utf-8-sig"))
     except UnicodeDecodeError:
         raise ConfigError(f"{path} is not saved as UTF-8; save it as UTF-8 and try again") from None
     except OSError as error:
@@ -55,7 +66,7 @@ def load_config(path: Path) -> Config:
     if "\0" in data_folder:
         raise ConfigError(f"{path} has a null character in data_folder; remove it")
     try:
-        folder = Path(data_folder).expanduser()
+        folder = expand_home(data_folder)
     except RuntimeError:
         raise ConfigError(
             f"{path} sets data_folder under an unknown home folder: {data_folder}"

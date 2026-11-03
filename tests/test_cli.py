@@ -503,3 +503,36 @@ def test_a_config_reached_through_a_missing_folder_is_not_overwritten(launch_wit
 
     assert_fails_with_a_plain_message(app, "is not valid TOML")
     assert mine.read_text() == "data_folder = /no/quotes\n", "the user's settings must survive"
+    assert not (tmp_path / "missing").exists(), "a failed launch leaves no folder behind"
+
+
+def test_a_data_folder_in_a_folder_named_tilde_is_not_the_home_folder(
+    launch_with_data_folder, tmp_path
+):
+    app = launch_with_data_folder("./~/Voicewright")
+
+    assert_fails_with_a_plain_message(app, "needs data_folder to be a full path")
+    assert not (tmp_path / "home" / "Voicewright").exists()
+
+
+def test_a_port_held_by_a_program_that_trickles_its_headers_is_reported(run_voicewright):
+    with socket.socket() as slow_program:
+        slow_program.bind(("127.0.0.1", 0))
+        slow_program.listen()
+        port = slow_program.getsockname()[1]
+
+        def trickle_forever():
+            connection, _ = slow_program.accept()
+            with connection:
+                connection.sendall(b"HTTP/1.1 200 OK\r\n")
+                # One header byte a second: each read lands well inside a two-second timeout.
+                with contextlib.suppress(OSError):
+                    while True:
+                        connection.sendall(b"X")
+                        time.sleep(1)
+
+        threading.Thread(target=trickle_forever, daemon=True).start()
+
+        app = run_voicewright("--port", str(port))
+
+        assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")

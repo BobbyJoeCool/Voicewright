@@ -13,11 +13,14 @@ from pathlib import Path
 
 import uvicorn
 
-from voicewright.app import create_app
-from voicewright.config import ConfigError, default_config_path
+from voicewright.app import create_app, page_title
+from voicewright.config import ConfigError, default_config_path, expand_home
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+# The longest the port check may take in all. Per-read timeouts alone don't bound it: a program
+# that sends a byte every second never trips a two-second read timeout.
+PROBE_SECONDS = 3
 
 
 class PortHolder(enum.Enum):
@@ -84,15 +87,11 @@ def main() -> None:
 
 
 def config_file(text: str | None) -> Path:
-    """The config file `--config` names, with a leading ~ meaning a home folder.
-
-    Decided from the text as typed: pathlib turns "./~/x" into "~/x", which would lose the
-    difference between a folder named ~ and the home folder.
-    """
+    """The config file `--config` names, with a leading ~ meaning a home folder."""
     if text is None:
         return default_config_path()
     if text.startswith("~"):
-        return Path(text).expanduser()
+        return expand_home(text)
     try:
         # Absolute, so messages name the real file: "./~/x" would otherwise print as "~/x".
         return Path(text).absolute()
@@ -123,7 +122,20 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def whats_on(url: str) -> PortHolder:
-    """What answers at this local address."""
+    """What answers at this local address, decided within PROBE_SECONDS.
+
+    The check runs on a daemon thread, so one still stuck past the deadline ends with the
+    process. A program that keeps the check waiting that long is not Voicewright.
+    """
+    answers: list[PortHolder] = []
+    check = threading.Thread(target=lambda: answers.append(ask(url)), daemon=True)
+    check.start()
+    check.join(timeout=PROBE_SECONDS)
+    return answers[0] if answers else PortHolder.OTHER_PROGRAM
+
+
+def ask(url: str) -> PortHolder:
+    """What answers at this local address, asked once over HTTP."""
     # No proxies and no redirects: the probe only ever talks to this address. A redirect then
     # surfaces as an HTTP error, which means another program holds the port.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirects())
@@ -158,7 +170,7 @@ def has_voicewright_title(response) -> bool:
         if not chunk:
             break
         start += chunk
-    return b"<title>Voicewright</title>" in start
+    return page_title() in start
 
 
 def open_when_started(server: uvicorn.Server, url: str) -> None:

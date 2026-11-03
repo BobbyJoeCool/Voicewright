@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -7,6 +8,15 @@ from voicewright.config import ConfigError, load_config
 from voicewright.data_folder import DataFolder, MissingLinkTarget
 
 STATIC_FOLDER = Path(__file__).parent / "static"
+HOME_PAGE = STATIC_FOLDER / "index.html"
+
+
+def page_title() -> bytes:
+    """The home page's <title> element, as served: how a running Voicewright is recognized."""
+    title = re.search(rb"<title>.*?</title>", HOME_PAGE.read_bytes(), re.DOTALL)
+    if not title:
+        raise RuntimeError(f"{HOME_PAGE} needs a <title>")
+    return title.group()
 
 
 def create_app(config_path: Path) -> FastAPI:
@@ -29,6 +39,6 @@ def create_app(config_path: Path) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     def home() -> FileResponse:
-        return FileResponse(STATIC_FOLDER / "index.html")
+        return FileResponse(HOME_PAGE)
 
     return app
