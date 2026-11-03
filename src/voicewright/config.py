@@ -1,6 +1,7 @@
 """The local config file: lives outside git and holds the user's settings."""
 
 import json
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,13 +68,15 @@ def write_default_config(path: Path) -> None:
     # json.dumps gives a quoted, escaped string that is also a valid TOML basic string.
     path.parent.mkdir(parents=True, exist_ok=True)
     # Owner-only before anything is written, new file or not: it will hold the Freesound API key.
-    path.touch()
-    path.chmod(0o600)
-    path.write_text(
-        "# Voicewright settings. Keep this file out of git: it can hold your Freesound API key.\n"
-        f"data_folder = {json.dumps(str(default_data_folder()))}\n"
-        "# How many recent Outputs to keep before the oldest is removed (5 to 10).\n"
-        f"output_cache_size = {DEFAULT_OUTPUT_CACHE_SIZE}\n"
-        f"freesound_api_key = {json.dumps(DEFAULT_FREESOUND_API_KEY)}\n",
-        encoding="utf-8",
-    )
+    # Opening first means a folder at this path fails here, before its mode could be changed.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with open(fd, "w", encoding="utf-8") as file:
+        os.fchmod(fd, 0o600)
+        file.write(
+            "# Voicewright settings. Keep this file out of git: "
+            "it can hold your Freesound API key.\n"
+            f"data_folder = {json.dumps(str(default_data_folder()))}\n"
+            "# How many recent Outputs to keep before the oldest is removed (5 to 10).\n"
+            f"output_cache_size = {DEFAULT_OUTPUT_CACHE_SIZE}\n"
+            f"freesound_api_key = {json.dumps(DEFAULT_FREESOUND_API_KEY)}\n"
+        )

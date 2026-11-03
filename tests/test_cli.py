@@ -193,11 +193,12 @@ def test_a_data_folder_that_cannot_be_created_is_reported(
 
 def test_a_config_path_that_cannot_be_used_is_reported(launch_with_config, tmp_path):
     folder = tmp_path / "a-folder"
-    folder.mkdir()
+    folder.mkdir(mode=0o755)
 
     app = launch_with_config(folder)
 
     assert_fails_with_a_plain_message(app, str(folder))
+    assert folder.stat().st_mode & 0o777 == 0o755, "the folder must be left as it was"
 
 
 @pytest.mark.parametrize("port", ["0", "70000", "abc", "²", "１２３４"])
