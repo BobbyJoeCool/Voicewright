@@ -91,8 +91,14 @@ def config_file(text: str | None) -> Path:
     """
     if text is None:
         return default_config_path()
-    # Absolute, so messages name the real file: "./~/x" would otherwise print as "~/x".
-    return Path(text).expanduser() if text.startswith("~") else Path(text).absolute()
+    if text.startswith("~"):
+        return Path(text).expanduser()
+    try:
+        # Absolute, so messages name the real file: "./~/x" would otherwise print as "~/x".
+        return Path(text).absolute()
+    except OSError:
+        # The working folder is gone; keep the path as typed and let loading report it.
+        return Path(text)
 
 
 def is_default_config(path: Path) -> bool:

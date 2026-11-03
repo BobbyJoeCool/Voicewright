@@ -478,3 +478,16 @@ def test_a_bad_config_in_a_folder_named_tilde_is_reported_by_its_real_path(
     app = run_voicewright("--config", "./~/config.toml", "--port", str(free_port()))
 
     assert_fails_with_a_plain_message(app, f"{config} is not valid TOML")
+
+
+def test_a_relative_config_from_a_deleted_working_folder_is_reported(
+    run_voicewright, tmp_path, monkeypatch
+):
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+
+    app = run_voicewright("--config", "config.toml", "--port", str(free_port()))
+
+    assert_fails_with_a_plain_message(app, "config.toml")
