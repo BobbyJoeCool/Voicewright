@@ -491,3 +491,13 @@ def test_a_relative_config_from_a_deleted_working_folder_is_reported(
     app = run_voicewright("--config", "config.toml", "--port", str(free_port()))
 
     assert_fails_with_a_plain_message(app, "config.toml")
+
+
+def test_a_config_reached_through_a_missing_folder_is_not_overwritten(launch_with_config, tmp_path):
+    mine = tmp_path / "mine.toml"
+    mine.write_text("data_folder = /no/quotes\n")
+
+    app = launch_with_config(tmp_path / "missing" / ".." / "mine.toml")
+
+    assert_fails_with_a_plain_message(app, "is not valid TOML")
+    assert mine.read_text() == "data_folder = /no/quotes\n", "the user's settings must survive"

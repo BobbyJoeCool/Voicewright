@@ -34,6 +34,9 @@ def default_data_folder() -> Path:
 def load_config(path: Path) -> Config:
     """Read the config file, writing one with default settings on first run."""
     try:
+        # Folder first, then the check: "missing/../config.toml" names an existing file only
+        # once "missing" exists, and must not be overwritten as if it were new.
+        path.parent.mkdir(parents=True, exist_ok=True)
         # An empty file is what an interrupted first run leaves behind: start it over.
         if not path.is_file() or not path.read_text(encoding="utf-8-sig").strip():
             write_default_config(path)
@@ -66,7 +69,6 @@ def load_config(path: Path) -> Config:
 
 def write_default_config(path: Path) -> None:
     # json.dumps gives a quoted, escaped string that is also a valid TOML basic string.
-    path.parent.mkdir(parents=True, exist_ok=True)
     # Owner-only before anything is written, new file or not: it will hold the Freesound API key.
     # Opening first means a folder at this path fails here, before its mode could be changed.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
