@@ -135,6 +135,20 @@ def test_a_new_job_can_start_once_the_last_one_failed(client, start_job):
     assert start_job("generation", lambda report: 2).status_code == 200
 
 
+def test_the_current_job_is_the_one_running(client, start_job):
+    work, started, release = held_open(report_first=(0, None, "Loading the speech model"))
+    job_id = start_job("startup", work).json()["job_id"]
+    assert started.wait(timeout=5)
+
+    while_running = client.get("/jobs/current").json()
+    release.set()
+    wait_until_finished(client, job_id)
+
+    assert while_running["id"] == job_id
+    assert while_running["progress"]["message"] == "Loading the speech model"
+    assert client.get("/jobs/current").json() is None
+
+
 def test_an_unknown_job_is_404(client):
     assert client.get("/jobs/nope").status_code == 404
     assert client.get("/jobs/nope/result").status_code == 404
@@ -277,7 +291,7 @@ def test_v1_supports_no_vocal_effects():
         vocal_effects.render("laugh", Path("neutral.wav"))
 
 
-def test_without_real_engines_a_job_needing_a_model_fails_readably(write_config):
+def test_with_models_turned_off_a_job_needing_a_model_fails_readably(write_config):
     with TestClient(create_app(write_config(), default_engines())) as client:
         models = client.app.state.models
         job = client.app.state.jobs.start("generation", use_speech(models))
@@ -285,5 +299,5 @@ def test_without_real_engines_a_job_needing_a_model_fails_readably(write_config)
 
     assert status["error"] == (
         "The generation job stopped: couldn't load the speech model: "
-        "it isn't part of this version of Voicewright yet."
+        "models are turned off by VOICEWRIGHT_NO_MODELS."
     )

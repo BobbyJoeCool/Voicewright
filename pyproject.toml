@@ -20,6 +20,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The real speech model (Chatterbox on MLX, docs/design.md section 6). Apple Silicon only and
+# several GB of weights, so it is optional: tests run on fake engines and never need it.
+speech = [
+    "chatterbox-mlx>=1.3.1",
+]
 dev = [
     "httpx2>=2.0",
     "pytest>=8",
@@ -37,6 +42,9 @@ voicewright = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The smoke tests load real models: run them by hand with `pytest -m smoke -s`.
+addopts = "-m 'not smoke'"
+markers = ["smoke: loads a real model on the M2; slow, and run by hand"]
 filterwarnings = [
     # pydub imports audioop; harmless on the 3.11 and 3.12 this project supports.
     "ignore:'audioop' is deprecated:DeprecationWarning:pydub",

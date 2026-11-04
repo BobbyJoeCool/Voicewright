@@ -80,6 +80,11 @@ class JobRunner:
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
+    @property
+    def running(self) -> Job | None:
+        """The job running now, if any."""
+        return self._running
+
     def _run(self, job: Job, work: Work) -> None:
         def report(step: int, total: int | None, message: str) -> None:
             job.progress = Progress(step, total, message)
@@ -87,7 +92,10 @@ class JobRunner:
         try:
             result = work(report)
         except BaseException as error:  # noqa: BLE001 - every failure ends the job, not the app
-            self._finish(job, error=failure_message(job, error))
+            message = failure_message(job, error)
+            # Also in the terminal, for a failure nobody is watching the page for (startup).
+            log.warning("%s", message)
+            self._finish(job, error=message)
         else:
             self._finish(job, result=result)
 

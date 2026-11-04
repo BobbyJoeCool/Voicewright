@@ -15,6 +15,7 @@ import uvicorn
 
 from voicewright.app import create_app, page_title
 from voicewright.config import ConfigError, default_config_path, expand_home
+from voicewright.engines import models_turned_off
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -77,6 +78,8 @@ def main() -> None:
         app = create_app(config_path)
     except ConfigError as error:
         sys.exit(f"voicewright: {error}")
+    if not models_turned_off():
+        app.state.jobs.start("startup", load_speech_model(app.state.models))
     server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=args.port))
     threading.Thread(target=open_when_started, args=(server, url), daemon=True).start()
     try:
@@ -84,6 +87,16 @@ def main() -> None:
     except KeyboardInterrupt:
         # uvicorn shuts down cleanly on Ctrl-C, then re-raises it; uvicorn.run() hides it too.
         pass
+
+
+def load_speech_model(models):
+    """The startup job: load the speech model once, so the first Script doesn't wait for it."""
+
+    def work(report):
+        report(0, None, "Loading the speech model")
+        models.preload_speech()
+
+    return work
 
 
 def config_file(text: str | None) -> Path:

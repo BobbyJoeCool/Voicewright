@@ -5,6 +5,7 @@ model; tests swap every engine for a fake (tests/fakes.py). The speech and voice
 engines are large models, so they are only ever reached through the ModelManager.
 """
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,18 +68,39 @@ class Engines:
     vocal_effects: VocalEffectEngine
 
 
-def not_available(model: str) -> Callable[[], LargeModel]:
+# Set to start with every model turned off: for working on the page, and for the test suite,
+# which must never load a real model.
+NO_MODELS = "VOICEWRIGHT_NO_MODELS"
+
+
+def models_turned_off() -> bool:
+    return bool(os.environ.get(NO_MODELS))
+
+
+def not_available(model: str, reason: str) -> Callable[[], LargeModel]:
     def load() -> LargeModel:
-        raise ModelLoadError(model, "it isn't part of this version of Voicewright yet")
+        raise ModelLoadError(model, reason)
 
     return load
 
 
 def default_engines() -> Engines:
     """The engines a plain `voicewright` runs on."""
-    # The real speech engine (Chatterbox) arrives in step 1.4, voice design (Qwen3-TTS) in 2.2.
+    # Voice design (Qwen3-TTS) arrives in step 2.2.
+    load_voice_design = not_available(
+        "voice design model", "it isn't part of this version of Voicewright yet"
+    )
+    if models_turned_off():
+        off = f"models are turned off by {NO_MODELS}"
+        return Engines(
+            load_speech=not_available("speech model", off),
+            load_voice_design=not_available("voice design model", off),
+            vocal_effects=NoVocalEffects(),
+        )
+    from voicewright import chatterbox_speech  # imports engines; loaded here to avoid a cycle
+
     return Engines(
-        load_speech=not_available("speech model"),
-        load_voice_design=not_available("voice design model"),
+        load_speech=chatterbox_speech.load,
+        load_voice_design=load_voice_design,
         vocal_effects=NoVocalEffects(),
     )

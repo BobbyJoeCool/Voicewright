@@ -1,10 +1,16 @@
 import json
+import os
 
 import pytest
 from fakes import FakeEngines
 from fastapi.testclient import TestClient
 
 from voicewright.app import create_app
+from voicewright.engines import NO_MODELS
+
+# No test loads a real model, even with the speech extra installed: this reaches every app the
+# tests start, in-process or as the installed `voicewright` command. The smoke tests opt back in.
+os.environ[NO_MODELS] = "1"
 
 
 @pytest.fixture(autouse=True)
