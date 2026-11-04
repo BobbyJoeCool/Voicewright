@@ -18,6 +18,10 @@ _Avoid_: Pending voice, temp voice
 One emotion a Voice can deliver: its reference clip and its tuning values. A Voice starts with the Default emotion set and can gain, lose, or retune presets later.
 _Avoid_: Emotion sample, emotion clip, emotion variant, delivery
 
+**Take**:
+One clip made while reviewing a Draft voice: a designed Reference clip, or a retune's preview spoken at new values. Every take is kept until the Draft voice is accepted or discarded; each Emotion preset points at one designed take.
+_Avoid_: Version, attempt, sample
+
 **Default emotion set**:
 The list of emotions every new Voice starts with.
 _Avoid_: Starter emotions, base emotions

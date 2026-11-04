@@ -19,6 +19,14 @@ The Convert panel on the page turns an audio or video file (MP3, M4A, FLAC, OGG,
 
 `POST /voices/design` with `{"description": "A gravelly older man, slow and calm."}` starts a job that designs a Draft voice. Qwen3-TTS designs the neutral clip, then one Emotion preset for each emotion in the Default emotion set (`GET /emotions/defaults`). The first run downloads its weights, about 8 GB. Follow the job at `GET /jobs/{id}`. Its result names the Draft voice: `GET /voices/drafts/{id}` lists its presets, and each preset's `clip_url` plays the clip. Draft voices are kept in the data folder's `drafts` folder and survive a restart.
 
+To review a Draft voice, each of these starts a job and adds a take; no take is deleted while the draft is open:
+
+- `POST /voices/drafts/{id}/presets/{emotion}/regenerate` designs a new take of one preset, or of the neutral clip.
+- `POST /voices/drafts/{id}/presets/{emotion}/retune` with `{"exaggeration": 0.9, "cfg": 0.2}` speaks the preset's sample at those values, so you can hear them, and keeps them.
+- `POST /voices/drafts/{id}/redesign` with `{"description": "…"}` changes the description and designs every preset again.
+
+`PUT /voices/drafts/{id}/presets/{emotion}` with `{"take": "angry-1"}` goes back to an earlier take.
+
 ### Settings and data
 
 On first run the app writes a config file to `~/.config/voicewright/config.toml` (or wherever `--config` points) and creates the app data folder it names, `~/Voicewright` by default, with `voices`, `drafts`, `sounds`, `cache`, and `saved` subfolders. To move the data folder, set `data_folder` to a full path or one starting with `~`. The config file also holds the Output cache size (5 to 10) and your Freesound API key, so it is created readable only by you. Keep it out of git.

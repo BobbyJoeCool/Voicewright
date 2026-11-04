@@ -1,34 +1,9 @@
 import threading
-import time
 
 import pytest
 from conftest import run_app
 from fakes import load_error
-
-DESCRIPTION = "A gravelly older man with a slow, calm, warm voice."
-
-
-def wait_until_finished(client, job_id: str, timeout: float = 5) -> dict:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        status = client.get(f"/jobs/{job_id}").json()
-        if status["state"] != "running":
-            return status
-        time.sleep(0.02)
-    pytest.fail(f"job {job_id} never finished")
-
-
-def design(client, description: str = DESCRIPTION) -> dict:
-    """Design a Draft voice and wait for the job; return the job's final status."""
-    started = client.post("/voices/design", json={"description": description})
-    assert started.status_code == 202, started.text
-    return wait_until_finished(client, started.json()["job_id"])
-
-
-def designed_draft(client) -> dict:
-    status = design(client)
-    assert status["state"] == "succeeded", status["error"]
-    return client.get(f"/voices/drafts/{status['result']['draft_id']}").json()
+from voices import DESCRIPTION, design, designed_draft, wait_until_finished
 
 
 def test_a_new_draft_voice_gets_every_default_emotion(client):
@@ -207,15 +182,15 @@ def test_a_draft_voice_survives_an_app_restart(write_config, fakes):
     [
         pytest.param("/voices/drafts/0123456789abcdef0123456789abcdef", id="unknown-draft"),
         pytest.param("/voices/drafts/..%2F..%2Fconfig", id="not-a-draft-id"),
-        pytest.param("/voices/drafts/0123456789abcdef0123456789abcdef/clips/neutral", id="clip"),
+        pytest.param("/voices/drafts/0123456789abcdef0123456789abcdef/takes/neutral-1", id="take"),
     ],
 )
 def test_an_unknown_draft_is_404(client, path):
     assert client.get(path).status_code == 404
 
 
-def test_an_emotion_the_draft_lacks_is_404(client):
+def test_a_take_the_draft_lacks_is_404(client):
     draft = designed_draft(client)
 
-    assert client.get(f"/voices/drafts/{draft['id']}/clips/whispering").status_code == 404
-    assert client.get(f"/voices/drafts/{draft['id']}/clips/..%2Fdraft.json").status_code == 404
+    assert client.get(f"/voices/drafts/{draft['id']}/takes/whispering-1").status_code == 404
+    assert client.get(f"/voices/drafts/{draft['id']}/takes/..%2Fdraft.json").status_code == 404
