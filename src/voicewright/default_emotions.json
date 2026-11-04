@@ -1,0 +1,22 @@
+{
+  "neutral": {
+    "sample": "The road out of town runs past the old grain elevator and the river. Most mornings it's quiet, just the wind and a few trucks heading for the highway. I've driven it so many times I could do it with my eyes closed.",
+    "exaggeration": 0.5,
+    "cfg": 0.5
+  },
+  "angry": {
+    "sample": "I told you to stay out of my workshop, and you did it anyway!",
+    "exaggeration": 0.7,
+    "cfg": 0.3
+  },
+  "sad": {
+    "sample": "I kept his letters. I just never had the heart to read them again.",
+    "exaggeration": 0.3,
+    "cfg": 0.5
+  },
+  "excited": {
+    "sample": "We did it! The whole crop came in, every last row of it!",
+    "exaggeration": 0.65,
+    "cfg": 0.35
+  }
+}

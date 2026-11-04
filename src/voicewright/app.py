@@ -12,6 +12,7 @@ from starlette.background import BackgroundTask
 from voicewright.audio_converter import SUPPORTED, FfmpegMissing, UnsupportedAudio, convert
 from voicewright.config import ConfigError, load_config
 from voicewright.data_folder import DataFolder, MissingLinkTarget
+from voicewright.default_emotions import DEFAULT_EMOTIONS_FILE, load_default_emotions
 from voicewright.engines import Engines, default_engines
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
@@ -26,6 +27,15 @@ def page_title() -> bytes:
     if not title:
         raise RuntimeError(f"{HOME_PAGE} needs a <title>")
     return title.group()
+
+
+class DefaultEmotionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    sample: str
+    exaggeration: float
+    cfg: float
 
 
 class ProgressOut(BaseModel):
@@ -49,8 +59,16 @@ class JobOut(BaseModel):
     error: str | None = None
 
 
-def create_app(config_path: Path, engines: Engines | None = None) -> FastAPI:
-    """The app, on the given engines (the real ones unless a test passes fakes)."""
+def create_app(
+    config_path: Path,
+    engines: Engines | None = None,
+    default_emotions_file: Path = DEFAULT_EMOTIONS_FILE,
+) -> FastAPI:
+    """The app, on the given engines (the real ones unless a test passes fakes).
+
+    Raises ConfigError, or DefaultEmotionsError for a broken Default emotion set file.
+    """
+    default_emotions = load_default_emotions(default_emotions_file)
     config = load_config(config_path)
     folder = config.data_folder
     try:
@@ -87,6 +105,11 @@ def create_app(config_path: Path, engines: Engines | None = None) -> FastAPI:
         if job is None:
             raise HTTPException(404, f"no job {job_id}; it may have finished long ago")
         return job
+
+    @app.get("/emotions/defaults")
+    def list_default_emotions() -> list[DefaultEmotionOut]:
+        """The Default emotion set: each emotion's sample sentence and starting values."""
+        return [DefaultEmotionOut.model_validate(emotion) for emotion in default_emotions]
 
     @app.get("/jobs/current")
     def current_job() -> JobOut | None:

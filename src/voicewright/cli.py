@@ -15,6 +15,7 @@ import uvicorn
 
 from voicewright.app import create_app, page_title
 from voicewright.config import ConfigError, default_config_path, expand_home
+from voicewright.default_emotions import DefaultEmotionsError
 from voicewright.engines import models_turned_off
 
 HOST = "127.0.0.1"
@@ -76,7 +77,7 @@ def main() -> None:
 
     try:
         app = create_app(config_path)
-    except ConfigError as error:
+    except (ConfigError, DefaultEmotionsError) as error:
         sys.exit(f"voicewright: {error}")
     if not models_turned_off():
         app.state.jobs.start("startup", load_speech_model(app.state.models))
