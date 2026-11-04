@@ -207,8 +207,9 @@ Step 0.2 ran these spikes on the M2 on 2026-10-30. The scripts are in `spikes/`.
 
 Library notes from the spikes, for the real engines:
 
-- `chatterbox-mlx` 1.0.6: the hybrid backend is the `ChatterboxTTSMLX` class; `from_pretrained(device="mps")`. `device="hybrid-mlx"` is rejected.
-- Resemble's `perth` watermarker (used by Chatterbox) imports `pkg_resources`, so pin `setuptools<81`; with a newer setuptools it silently fails to load.
+- `chatterbox-mlx` (1.0.6 in the spike, 1.3.1 in the app): the hybrid backend is the `ChatterboxTTSMLX` class; `from_pretrained(device="mps")`. `device="hybrid-mlx"` is rejected. Its `generate_long` splits text over 50 words into chunks of about 35 words.
+- Resemble's `perth` watermarker (used by Chatterbox) imports `pkg_resources`, which setuptools 82 removes. `chatterbox-mlx` 1.3.1 itself requires `setuptools<82`; on 81 the watermarker loads, with a deprecation warning.
+- Measured in step 1.4 on the M2 (1.3.1): the speech model loads in about 12 seconds and the app's footprint is about 5 GB, well under the 14 to 16 GB planned for. A 120-word passage comes out at 22 to 29 seconds (about 4.4 words a second, in both 1.0.6 and 1.3.1). With a robotic Reference clip (macOS `say`), a chunk sometimes ends early; to check with a designed clip once voice design exists (step 2.2).
 
 ## Future versions
 

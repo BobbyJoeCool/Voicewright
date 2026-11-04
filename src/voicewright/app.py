@@ -88,6 +88,12 @@ def create_app(config_path: Path, engines: Engines | None = None) -> FastAPI:
             raise HTTPException(404, f"no job {job_id}; it may have finished long ago")
         return job
 
+    @app.get("/jobs/current")
+    def current_job() -> JobOut | None:
+        """The job running now (e.g. loading the speech model at startup), or null."""
+        running = jobs.running
+        return None if running is None else JobOut.model_validate(running)
+
     @app.get("/jobs/{job_id}")
     def job_status(job_id: str) -> JobOut:
         """A job's state and progress, and its result or error once it has finished."""
