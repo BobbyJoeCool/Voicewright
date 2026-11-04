@@ -8,6 +8,7 @@ import io
 import math
 import struct
 import wave
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -47,6 +48,9 @@ class FakeEngines:
     # Set to an exception to make that model fail when it loads, or when it is used.
     fail_to_load: dict[str, BaseException] = field(default_factory=dict)
     fail_to_run: dict[str, BaseException] = field(default_factory=dict)
+    # Called with the call's number (0, 1, …) before each engine call: to pause a job part way,
+    # or make one call fail.
+    before_call: Callable[[int], None] | None = None
     loaded: set[str] = field(default_factory=set)
     most_loaded_at_once: int = 0
 
@@ -62,6 +66,8 @@ class FakeEngines:
             raise AssertionError(f"the {model} was used while not loaded")
         if model in self.fail_to_run:
             raise self.fail_to_run[model]
+        if self.before_call is not None:
+            self.before_call(len(self.calls))
         wav = tone_wav(220 + 20 * len(self.calls))
         self.calls.append(Call(model, inputs, wav))
         return wav

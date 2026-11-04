@@ -6,16 +6,21 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
 from voicewright.audio_converter import SUPPORTED, FfmpegMissing, UnsupportedAudio, convert
 from voicewright.config import ConfigError, load_config
 from voicewright.data_folder import DataFolder, MissingLinkTarget
 from voicewright.default_emotions import DEFAULT_EMOTIONS_FILE, load_default_emotions
+from voicewright.drafts import Draft, DraftStore
 from voicewright.engines import Engines, default_engines
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
+from voicewright.voice_design import design_draft_voice
+
+# Long enough for a detailed description; Qwen is told the whole thing for every clip.
+MAX_DESCRIPTION = 500
 
 STATIC_FOLDER = Path(__file__).parent / "static"
 HOME_PAGE = STATIC_FOLDER / "index.html"
@@ -36,6 +41,56 @@ class DefaultEmotionOut(BaseModel):
     sample: str
     exaggeration: float
     cfg: float
+
+
+class DesignRequest(BaseModel):
+    description: str = Field(max_length=MAX_DESCRIPTION)
+
+    @field_validator("description")
+    @classmethod
+    def not_blank(cls, description: str) -> str:
+        description = " ".join(description.split())
+        if not description:
+            raise ValueError("describe the voice, e.g. a gravelly older man, slow and calm")
+        return description
+
+
+class JobStarted(BaseModel):
+    job_id: str
+
+
+class PresetOut(BaseModel):
+    exaggeration: float
+    cfg: float
+    clip_url: str
+
+
+class DraftOut(BaseModel):
+    id: str
+    description: str
+    created: str
+    emotions: list[str]
+    presets: dict[str, PresetOut]
+    # Emotions not designed yet: designing is still running, or stopped part way.
+    missing: list[str]
+
+    @classmethod
+    def of(cls, draft: Draft) -> "DraftOut":
+        return cls(
+            id=draft.id,
+            description=draft.description,
+            created=draft.created,
+            emotions=list(draft.emotions),
+            presets={
+                name: PresetOut(
+                    exaggeration=preset.exaggeration,
+                    cfg=preset.cfg,
+                    clip_url=f"/voices/drafts/{draft.id}/clips/{name}",
+                )
+                for name, preset in draft.presets.items()
+            },
+            missing=list(draft.missing),
+        )
 
 
 class ProgressOut(BaseModel):
@@ -86,8 +141,10 @@ def create_app(
 
     app = FastAPI(title="Voicewright")
     jobs = JobRunner()
+    models = ModelManager(engines or default_engines())
+    drafts = DraftStore(folder / "drafts")
     app.state.jobs = jobs
-    app.state.models = ModelManager(engines or default_engines())
+    app.state.models = models
 
     @app.exception_handler(JobAlreadyRunning)
     def job_already_running(request: Request, error: JobAlreadyRunning) -> JSONResponse:
@@ -110,6 +167,32 @@ def create_app(
     def list_default_emotions() -> list[DefaultEmotionOut]:
         """The Default emotion set: each emotion's sample sentence and starting values."""
         return [DefaultEmotionOut.model_validate(emotion) for emotion in default_emotions]
+
+    @app.post("/voices/design", status_code=202)
+    def design_voice(request: DesignRequest) -> JobStarted:
+        """Start designing a Draft voice: the neutral clip, then every default Emotion preset."""
+        work = design_draft_voice(drafts, models, default_emotions, request.description)
+        return JobStarted(job_id=jobs.start("voice design", work).id)
+
+    def find_draft(draft_id: str) -> Draft:
+        draft = drafts.get(draft_id)
+        if draft is None:
+            raise HTTPException(404, f"no Draft voice {draft_id}")
+        return draft
+
+    @app.get("/voices/drafts/{draft_id}")
+    def get_draft(draft_id: str) -> DraftOut:
+        """A Draft voice: its description and the presets designed so far, with clip URLs."""
+        return DraftOut.of(find_draft(draft_id))
+
+    @app.get("/voices/drafts/{draft_id}/clips/{emotion}")
+    def get_draft_clip(draft_id: str, emotion: str) -> FileResponse:
+        """One preset's Reference clip, as standard WAV."""
+        find_draft(draft_id)
+        clip = drafts.clip_path(draft_id, emotion)
+        if clip is None:
+            raise HTTPException(404, f"Draft voice {draft_id} has no {emotion} clip")
+        return FileResponse(clip, media_type="audio/wav")
 
     @app.get("/jobs/current")
     def current_job() -> JobOut | None:

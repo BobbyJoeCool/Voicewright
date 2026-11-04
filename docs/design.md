@@ -203,7 +203,7 @@ Step 0.2 ran these spikes on the M2 on 2026-10-30. The scripts are in `spikes/`.
    - VoxCPM2 style-cloning from Qwen's neutral clip: close to the same man, emotions came through, better than VoxCPM2 alone, RTF 2.5 to 3.9, peak RSS 13.3GB.
    - The user judged that cloning was what made the voice drift and chose to design each emotion with Qwen. Not checked: whether Qwen's separately designed emotions sound like the same man. Review in the Draft voice is the safeguard.
 3. **Vocal effects: not in v1.** Chatterbox Turbo ran on `mps`, RTF about 2.0, green, and stayed in the cloned voice. `[chuckle]` was convincing; `[laugh]` and `[cough]` sounded forced or fake; `[sigh]` came out as breathing in; `(scream)`, which Turbo doesn't document, was read aloud as the word. The user chose to leave vocal effects out of v1.
-4. **Memory:** each model ran alone without going red. Only VoxCPM2 reached yellow, and v1 doesn't use it. The load-and-unload switch between Qwen and Chatterbox is still to be confirmed in the smoke test (step 5.2).
+4. **Memory:** each model ran alone without going red. Only VoxCPM2 reached yellow, and v1 doesn't use it. Step 2.2 confirmed the load-and-unload switch between Qwen and Chatterbox on the M2. Chatterbox loaded holds 2.0 GB of MLX and 1.0 GB of MPS memory, and both drop to zero when it closes. Qwen loaded holds 4.3 GB, and reaches a 7.3 GB MLX peak while designing a clip. Chatterbox comes back afterwards. The process footprint peaked at 14 GB while designing a full Draft voice: four clips in 47 seconds, with a 15-second neutral clip. The full smoke test is still step 5.2.
 
 Library notes from the spikes, for the real engines:
 

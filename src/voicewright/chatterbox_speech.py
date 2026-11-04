@@ -5,11 +5,10 @@ model loads, so the app and its tests run without it.
 """
 
 import gc
-import io
-import wave
 from pathlib import Path
 
-from voicewright.engines import ModelLoadError, OutOfMemory
+from voicewright.engines import ModelLoadError, raise_if_out_of_memory
+from voicewright.wav import standard_wav
 
 MODEL = "speech model"
 # Above this many words, Chatterbox's long-text path keeps narration from cutting off.
@@ -67,24 +66,3 @@ class ChatterboxSpeech:
         mx.clear_cache()
         if torch.backends.mps.is_available():
             torch.mps.empty_cache()
-
-
-def raise_if_out_of_memory(error: RuntimeError) -> None:
-    """MLX and PyTorch report running out of memory as a RuntimeError; name it as such."""
-    message = str(error).lower()
-    if "out of memory" in message or "insufficient memory" in message:
-        raise OutOfMemory(str(error)) from error
-
-
-def standard_wav(samples, rate: int) -> bytes:
-    """Float samples from -1 to 1 as standard WAV bytes: 16-bit PCM, mono."""
-    import numpy as np
-
-    pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2")
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(rate)
-        wav.writeframes(pcm.tobytes())
-    return buffer.getvalue()
