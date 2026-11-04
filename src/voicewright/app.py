@@ -18,6 +18,7 @@ from voicewright.default_emotions import (
     EXAGGERATION_RANGE,
     load_default_emotions,
 )
+from voicewright.default_emotions import NAME as EMOTION_NAME
 from voicewright.drafts import Draft, DraftProblem, DraftStore
 from voicewright.engines import Engines, default_engines
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
@@ -28,7 +29,15 @@ from voicewright.voice_design import (
     regenerate_preset,
     retune_preset,
 )
-from voicewright.voice_library import DraftIncomplete, NameTaken, Voice, VoiceLibrary
+from voicewright.voice_editing import GENERIC_SAMPLE, design_pending_take, retune_saved_preset
+from voicewright.voice_library import (
+    NEUTRAL,
+    DraftIncomplete,
+    NameTaken,
+    Voice,
+    VoiceLibrary,
+    VoiceProblem,
+)
 
 # Long enough for a detailed description; Qwen is told the whole thing for every clip.
 MAX_DESCRIPTION = 500
@@ -147,20 +156,37 @@ class SavedPresetOut(BaseModel):
     clip_url: str
 
 
+class PendingTakeOut(BaseModel):
+    id: str
+    emotion: str
+    kind: str  # "design" (a new Reference clip) or "preview" (a retune at new values)
+    created: str
+    exaggeration: float
+    cfg: float
+    sample: str
+    url: str
+
+
 class VoiceOut(BaseModel):
     id: str
     name: str
     description: str
     created: str
     presets: dict[str, SavedPresetOut]
+    # Takes waiting to be accepted or rejected, oldest first.
+    pending: list[PendingTakeOut]
 
     @classmethod
-    def of(cls, voice: Voice) -> "VoiceOut":
+    def of(cls, voice: Voice, pending=()) -> "VoiceOut":
         return cls(
             id=voice.id,
             name=voice.name,
             description=voice.description,
             created=voice.created,
+            pending=[
+                PendingTakeOut(**take.__dict__, url=f"/voices/{voice.id}/takes/{take.id}")
+                for take in pending
+            ],
             presets={
                 name: SavedPresetOut(
                     exaggeration=p.exaggeration,
@@ -171,6 +197,31 @@ class VoiceOut(BaseModel):
                 for name, p in voice.presets.items()
             },
         )
+
+
+class AddPresetRequest(BaseModel):
+    name: str
+    sample: str | None = Field(default=None, max_length=500)
+    exaggeration: float | None = Field(
+        default=None, ge=EXAGGERATION_RANGE[0], le=EXAGGERATION_RANGE[1]
+    )
+    cfg: float | None = Field(default=None, ge=CFG_RANGE[0], le=CFG_RANGE[1])
+
+    @field_validator("name")
+    @classmethod
+    def emotion_name(cls, name: str) -> str:
+        name = name.strip().lower()
+        if not EMOTION_NAME.fullmatch(name):
+            raise ValueError(
+                "an emotion name is lowercase letters, digits, - and _, starting with a letter"
+            )
+        return name
+
+    @field_validator("sample")
+    @classmethod
+    def tidy_sample(cls, sample: str | None) -> str | None:
+        sample = " ".join(sample.split()) if sample else ""
+        return sample or None
 
 
 class RetuneRequest(BaseModel):
@@ -286,21 +337,41 @@ def create_app(
         """Save a Draft voice to the library under a name; the draft and its takes go."""
         draft = find_draft(request.draft_id)
         try:
-            return VoiceOut.of(library.accept(draft, request.name))
+            return voice_out(library.accept(draft, request.name))
         except (NameTaken, DraftIncomplete) as problem:
             raise HTTPException(409, str(problem)) from None
 
-    @app.get("/voices")
-    def list_voices() -> list[VoiceOut]:
-        """Every saved Voice, by name, with its Emotion presets."""
-        return [VoiceOut.of(voice) for voice in library.list()]
+    def voice_out(voice: Voice) -> VoiceOut:
+        return VoiceOut.of(voice, library.pending(voice.id))
 
-    @app.get("/voices/{voice_id}")
-    def get_voice(voice_id: str) -> VoiceOut:
+    def find_voice(voice_id: str) -> Voice:
         voice = library.get(voice_id)
         if voice is None:
             raise HTTPException(404, f"no Voice {voice_id}")
-        return VoiceOut.of(voice)
+        return voice
+
+    def find_preset(voice: Voice, emotion: str) -> None:
+        if emotion not in voice.presets:
+            raise HTTPException(404, f"{voice.name} has no {emotion} preset")
+
+    def wav(path: Path) -> FileResponse:
+        # A saved preset's clip can be replaced: make the browser ask again each time.
+        return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/voices")
+    def list_voices() -> list[VoiceOut]:
+        """Every saved Voice, by name, with its Emotion presets and pending takes."""
+        return [voice_out(voice) for voice in library.list()]
+
+    @app.get("/voices/{voice_id}")
+    def get_voice(voice_id: str) -> VoiceOut:
+        return voice_out(find_voice(voice_id))
+
+    @app.delete("/voices/{voice_id}", status_code=204)
+    def delete_voice(voice_id: str) -> None:
+        """Delete a saved Voice, its clips, and its pending takes."""
+        if not library.delete(voice_id):
+            raise HTTPException(404, f"no Voice {voice_id}")
 
     @app.get("/voices/{voice_id}/clips/{emotion}")
     def get_voice_clip(voice_id: str, emotion: str) -> FileResponse:
@@ -308,7 +379,83 @@ def create_app(
         clip = library.clip_path(voice_id, emotion)
         if clip is None:
             raise HTTPException(404, f"no {emotion} preset on Voice {voice_id}")
-        return FileResponse(clip, media_type="audio/wav")
+        return wav(clip)
+
+    @app.post("/voices/{voice_id}/presets", status_code=202)
+    def add_preset(voice_id: str, request: AddPresetRequest) -> JobStarted:
+        """Design a custom Emotion preset as a pending take. Values start from neutral's."""
+        voice = find_voice(voice_id)
+        if request.name in voice.presets:
+            raise HTTPException(409, f"{voice.name} already has a {request.name} preset")
+        neutral = voice.presets[NEUTRAL]
+        work = design_pending_take(
+            library,
+            models,
+            voice_id,
+            request.name,
+            request.sample or GENERIC_SAMPLE,
+            neutral.exaggeration if request.exaggeration is None else request.exaggeration,
+            neutral.cfg if request.cfg is None else request.cfg,
+        )
+        return JobStarted(job_id=jobs.start("voice design", work).id)
+
+    @app.post("/voices/{voice_id}/presets/{emotion}/regenerate", status_code=202)
+    def regenerate_saved(voice_id: str, emotion: str) -> JobStarted:
+        """Design a new clip for a preset, as a pending take. The neutral clip is locked."""
+        voice = find_voice(voice_id)
+        find_preset(voice, emotion)
+        if emotion == NEUTRAL:
+            raise HTTPException(409, "the neutral Reference clip is locked once the Voice is saved")
+        preset = voice.presets[emotion]
+        work = design_pending_take(
+            library, models, voice_id, emotion, preset.sample, preset.exaggeration, preset.cfg
+        )
+        return JobStarted(job_id=jobs.start("voice design", work).id)
+
+    @app.post("/voices/{voice_id}/presets/{emotion}/retune", status_code=202)
+    def retune_saved(voice_id: str, emotion: str, request: RetuneRequest) -> JobStarted:
+        """Hear a preset at new values, as a pending take; accepting it keeps the values."""
+        find_preset(find_voice(voice_id), emotion)
+        work = retune_saved_preset(
+            library, models, voice_id, emotion, request.exaggeration, request.cfg
+        )
+        return JobStarted(job_id=jobs.start("retune", work).id)
+
+    @app.delete("/voices/{voice_id}/presets/{emotion}")
+    def remove_preset(voice_id: str, emotion: str) -> VoiceOut:
+        """Remove any preset but neutral."""
+        find_preset(find_voice(voice_id), emotion)
+        try:
+            return voice_out(library.remove_preset(voice_id, emotion))
+        except VoiceProblem as problem:
+            raise HTTPException(409, str(problem)) from None
+
+    @app.get("/voices/{voice_id}/takes/{take_id}")
+    def get_pending_take(voice_id: str, take_id: str) -> FileResponse:
+        path = library.pending_take_path(voice_id, take_id)
+        if path is None:
+            raise HTTPException(404, f"no pending take {take_id} on Voice {voice_id}")
+        return wav(path)
+
+    @app.post("/voices/{voice_id}/takes/{take_id}/accept")
+    def accept_take(voice_id: str, take_id: str) -> VoiceOut:
+        """Let a pending take replace (or add) its preset."""
+        find_voice(voice_id)
+        try:
+            return voice_out(library.accept_take(voice_id, take_id))
+        except LookupError:
+            raise HTTPException(404, f"no pending take {take_id}") from None
+        except VoiceProblem as problem:
+            raise HTTPException(409, str(problem)) from None
+
+    @app.delete("/voices/{voice_id}/takes/{take_id}", status_code=204)
+    def reject_take(voice_id: str, take_id: str) -> None:
+        """Reject a pending take; the preset stays as it was."""
+        find_voice(voice_id)
+        try:
+            library.reject_take(voice_id, take_id)
+        except LookupError:
+            raise HTTPException(404, f"no pending take {take_id}") from None
 
     @app.get("/voices/drafts/{draft_id}")
     def get_draft(draft_id: str) -> DraftOut:

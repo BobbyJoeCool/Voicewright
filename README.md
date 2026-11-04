@@ -29,6 +29,14 @@ To review a Draft voice, each of these starts a job and adds a take; no take is 
 
 When the Draft voice sounds right, `POST /voices` with `{"draft_id": "…", "name": "Old Narrator"}` saves it to the library, in the data folder's `voices` folder, and removes the draft and its takes. A name already taken, ignoring case, gets 409. `DELETE /voices/drafts/{id}` discards a draft instead. `GET /voices/drafts` lists the drafts still open, for picking up after a restart. `GET /voices` lists saved Voices with their presets.
 
+To edit a saved Voice, each of these starts a job that makes a pending take. The Voice changes only when you accept it (`POST /voices/{id}/takes/{take}/accept`); rejecting it (`DELETE /voices/{id}/takes/{take}`) leaves the preset as it was:
+
+- `POST /voices/{id}/presets` with `{"name": "angry-soft"}` adds a custom preset. `sample`, `exaggeration`, and `cfg` are optional; the values start from neutral's.
+- `POST /voices/{id}/presets/{emotion}/regenerate` designs a new clip for a preset. The neutral clip is locked, so this is refused for neutral.
+- `POST /voices/{id}/presets/{emotion}/retune` with new values lets you hear them first.
+
+`DELETE /voices/{id}/presets/{emotion}` removes any preset but neutral, and `DELETE /voices/{id}` deletes the Voice. The description can't be edited once the Voice is saved.
+
 ### Settings and data
 
 On first run the app writes a config file to `~/.config/voicewright/config.toml` (or wherever `--config` points) and creates the app data folder it names, `~/Voicewright` by default, with `voices`, `drafts`, `sounds`, `cache`, and `saved` subfolders. To move the data folder, set `data_folder` to a full path or one starting with `~`. The config file also holds the Output cache size (5 to 10) and your Freesound API key, so it is created readable only by you. Keep it out of git.

@@ -19,7 +19,7 @@ One emotion a Voice can deliver: its reference clip and its tuning values. A Voi
 _Avoid_: Emotion sample, emotion clip, emotion variant, delivery
 
 **Take**:
-One clip made while reviewing a Draft voice: a designed Reference clip, or a retune's preview spoken at new values. Every take is kept until the Draft voice is accepted or discarded; each Emotion preset points at one designed take.
+One clip made while reviewing a Voice: a designed Reference clip, or a retune's preview spoken at new values. On a Draft voice every take is kept until the draft is accepted or discarded, and each Emotion preset points at one designed take. On a saved Voice a take is pending: it changes the preset only when accepted.
 _Avoid_: Version, attempt, sample
 
 **Default emotion set**:

@@ -11,6 +11,8 @@ Every write is atomic (write a temp file, then rename), so a crash leaves the ta
 never a half-written file. Draft voices are never cleared on startup.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
