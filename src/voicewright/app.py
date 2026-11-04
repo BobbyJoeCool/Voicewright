@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
@@ -532,6 +533,8 @@ def create_app(
     @app.get("/", include_in_schema=False)
     def home() -> FileResponse:
         return FileResponse(HOME_PAGE)
+
+    app.mount("/static", StaticFiles(directory=STATIC_FOLDER), name="static")
 
     @app.post("/convert")
     def convert_file(file: UploadFile) -> FileResponse:

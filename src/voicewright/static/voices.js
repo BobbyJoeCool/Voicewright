@@ -1,0 +1,500 @@
+// The Voices area: design a Draft voice, review it, accept or discard it, and edit saved Voices.
+// It talks only to the HTTP API. Anything the user typed goes into the page as text, never HTML.
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const jobBox = $("job");
+  const jobMessage = $("job-message");
+  const jobProgress = $("job-progress");
+  const errorBox = $("voices-error");
+
+  // The Draft voice open for review, if any.
+  let reviewing = null;
+
+  // --- Talking to the API -------------------------------------------------------------------
+
+  async function api(method, path, body) {
+    let response;
+    try {
+      response = await fetch(path, {
+        method,
+        headers: body === undefined ? {} : { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch {
+      throw new Error("Can't reach Voicewright; is it still running?");
+    }
+    if (response.status === 204) return null;
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(describeProblem(data, response.status));
+    return data;
+  }
+
+  function describeProblem(data, status) {
+    const detail = data && data.detail;
+    if (typeof detail === "string") return capitalize(detail) + ".";
+    if (Array.isArray(detail) && detail.length) {
+      // FastAPI's validation errors: "Value error, describe the voice, …"
+      return capitalize(String(detail[0].msg).replace(/^Value error, /, "")) + ".";
+    }
+    return `Something went wrong (HTTP ${status}).`;
+  }
+
+  const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+  function showError(error) {
+    errorBox.textContent = error.message;
+    errorBox.hidden = false;
+  }
+
+  // Run an action; show what went wrong instead of throwing. Returns false on failure.
+  async function attempt(action) {
+    errorBox.hidden = true;
+    try {
+      await action();
+      return true;
+    } catch (error) {
+      showError(error);
+      // A failed job may still have changed things (a design keeps the clips it made).
+      await refresh().catch(() => {});
+      return false;
+    }
+  }
+
+  // --- Jobs ---------------------------------------------------------------------------------
+
+  const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+  function showJob(job) {
+    const { step, total, message } = job.progress;
+    jobMessage.textContent = total ? `${message} (step ${step + 1} of ${total})` : message;
+    if (total) {
+      jobProgress.max = total;
+      jobProgress.value = step;
+    } else {
+      jobProgress.removeAttribute("value"); // an indeterminate bar
+    }
+    jobBox.hidden = false;
+    setBusy(true);
+  }
+
+  function hideJob() {
+    jobBox.hidden = true;
+    setBusy(false);
+  }
+
+  // While a job runs, buttons that would start another are disabled: the server would say 409.
+  function setBusy(busy) {
+    for (const button of document.querySelectorAll("button[data-starts-job]")) {
+      button.disabled = busy;
+    }
+  }
+
+  async function follow(jobId) {
+    for (;;) {
+      const job = await api("GET", `/jobs/${jobId}`);
+      if (job.state !== "running") {
+        hideJob();
+        if (job.state === "failed") throw new Error(job.error);
+        return job.result;
+      }
+      showJob(job);
+      await sleep(700);
+    }
+  }
+
+  // Start a job with POST `path`, follow it to the end, and return its result.
+  async function runJob(path, body) {
+    setBusy(true); // at once, so a second click can't start a second job
+    try {
+      const { job_id } = await api("POST", path, body);
+      return await follow(job_id);
+    } finally {
+      hideJob();
+    }
+  }
+
+  // A job may already be running when the page opens: loading the speech model at startup, or
+  // a design started before the page was reloaded.
+  async function followCurrentJob() {
+    const job = await api("GET", "/jobs/current");
+    if (job) {
+      await attempt(async () => {
+        await follow(job.id);
+        await refresh();
+      });
+    }
+  }
+
+  // --- Building the page --------------------------------------------------------------------
+
+  // el("button", {onclick, text: "Go"}, child, …): an element; `text` is set as text, never HTML.
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "text") node.textContent = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else if (key === "dataset") Object.assign(node.dataset, value);
+      else if (value === true) node.setAttribute(key, "");
+      else if (value !== false && value !== undefined) node.setAttribute(key, value);
+    }
+    node.append(...children.filter((child) => child !== null && child !== undefined));
+    return node;
+  }
+
+  const player = (url) => el("audio", { controls: true, preload: "none", src: url });
+
+  function jobButton(text, action) {
+    return el("button", {
+      type: "button",
+      text,
+      dataset: { startsJob: "" },
+      onclick: () => attempt(action),
+    });
+  }
+
+  // Exaggeration and cfg sliders, set to `preset`'s values; read() gives the chosen values.
+  function sliders(preset) {
+    const make = (label, value, max) => {
+      const input = el("input", { type: "range", min: 0, max, step: 0.05, value });
+      const shown = el("output", { text: Number(value).toFixed(2) });
+      input.addEventListener("input", () => (shown.textContent = Number(input.value).toFixed(2)));
+      return { input, node: el("label", { class: "slider" }, label, input, shown) };
+    };
+    const exaggeration = make("Exaggeration", preset.exaggeration, 2);
+    const cfg = make("cfg", preset.cfg, 1);
+    return {
+      nodes: [exaggeration.node, cfg.node],
+      read: () => ({ exaggeration: Number(exaggeration.input.value), cfg: Number(cfg.input.value) }),
+    };
+  }
+
+  // --- Draft voices -------------------------------------------------------------------------
+
+  async function refreshDrafts() {
+    const drafts = await api("GET", "/voices/drafts");
+    const list = $("drafts");
+    list.replaceChildren(
+      ...drafts.map((draft) =>
+        el(
+          "div",
+          { class: "row" },
+          el("span", { text: draft.description }),
+          draft.missing.length
+            ? el("span", { class: "muted", text: `(missing ${draft.missing.join(", ")})` })
+            : null,
+          el("button", { type: "button", text: "Resume", onclick: () => attempt(() => openDraft(draft.id)) }),
+          el("button", { type: "button", text: "Discard", onclick: () => attempt(() => discard(draft)) }),
+        ),
+      ),
+    );
+    $("drafts-area").hidden = drafts.length === 0;
+    if (reviewing && !drafts.some((draft) => draft.id === reviewing)) closeReview();
+  }
+
+  async function discard(draft) {
+    if (!confirm(`Discard the Draft voice "${draft.description}" and every take?`)) return;
+    await api("DELETE", `/voices/drafts/${draft.id}`);
+    if (reviewing === draft.id) closeReview();
+    await refreshDrafts();
+  }
+
+  function closeReview() {
+    reviewing = null;
+    $("review").hidden = true;
+    $("review").replaceChildren();
+  }
+
+  async function openDraft(draftId) {
+    const draft = await api("GET", `/voices/drafts/${draftId}`);
+    reviewing = draftId;
+    const review = $("review");
+    review.replaceChildren(
+      el("h3", { text: "Review the Draft voice" }),
+      ...descriptionEditor(draft),
+      ...draft.emotions.map((emotion) => draftPreset(draft, emotion)),
+      acceptForm(draft),
+    );
+    review.hidden = false;
+  }
+
+  function descriptionEditor(draft) {
+    const text = el("textarea", { rows: 2, maxlength: 500 });
+    text.value = draft.description;
+    return [
+      el("label", { text: "Description" }),
+      text,
+      el(
+        "div",
+        { class: "row" },
+        jobButton("Redesign every preset from this description", async () => {
+          await runJob(`/voices/drafts/${draft.id}/redesign`, { description: text.value });
+          await openDraft(draft.id);
+          await refreshDrafts();
+        }),
+      ),
+    ];
+  }
+
+  function draftPreset(draft, emotion) {
+    const preset = draft.presets[emotion];
+    const base = `/voices/drafts/${draft.id}/presets/${emotion}`;
+    const heading = el("strong", { text: emotion === "neutral" ? "neutral (the Voice's identity)" : emotion });
+    if (!preset) {
+      return el(
+        "div",
+        { class: "preset" },
+        heading,
+        el("p", { class: "muted", text: "Not designed yet." }),
+        jobButton("Design it", async () => {
+          await runJob(`${base}/regenerate`);
+          await openDraft(draft.id);
+          await refreshDrafts();
+        }),
+      );
+    }
+    const designs = draft.takes.filter((t) => t.emotion === emotion && t.kind === "design");
+    const previews = draft.takes.filter((t) => t.emotion === emotion && t.kind === "preview");
+    const lastPreview = previews[previews.length - 1];
+    const tune = sliders(preset);
+    const takeChooser =
+      designs.length > 1
+        ? el(
+            "label",
+            {},
+            "Take ",
+            el(
+              "select",
+              {
+                onchange: (event) =>
+                  attempt(async () => {
+                    await api("PUT", base, { take: event.target.value });
+                    await openDraft(draft.id);
+                  }),
+              },
+              ...designs.map((take) =>
+                el("option", { value: take.id, text: take.id, selected: take.id === preset.take }),
+              ),
+            ),
+          )
+        : null;
+    return el(
+      "div",
+      { class: "preset" },
+      heading,
+      player(preset.clip_url),
+      el(
+        "div",
+        { class: "row" },
+        takeChooser,
+        jobButton(emotion === "neutral" ? "Regenerate the neutral clip" : "Regenerate", async () => {
+          await runJob(`${base}/regenerate`);
+          await openDraft(draft.id);
+        }),
+      ),
+      el("div", { class: "row" }, ...tune.nodes),
+      el(
+        "div",
+        { class: "row" },
+        jobButton("Hear these values", async () => {
+          await runJob(`${base}/retune`, tune.read());
+          await openDraft(draft.id);
+        }),
+      ),
+      lastPreview
+        ? el(
+            "div",
+            {},
+            el("span", {
+              class: "muted",
+              text: `Spoken at exaggeration ${lastPreview.exaggeration}, cfg ${lastPreview.cfg}:`,
+            }),
+            player(lastPreview.url),
+          )
+        : null,
+    );
+  }
+
+  function acceptForm(draft) {
+    const name = el("input", { type: "text", maxlength: 60, placeholder: "Old Narrator" });
+    return el(
+      "form",
+      {
+        onsubmit: (event) => {
+          event.preventDefault();
+          attempt(async () => {
+            await api("POST", "/voices", { draft_id: draft.id, name: name.value });
+            closeReview();
+            await refresh();
+          });
+        },
+      },
+      el("h3", { text: "Save to your Voices" }),
+      el("label", { text: "Name" }),
+      name,
+      el(
+        "div",
+        { class: "row" },
+        el("button", { type: "submit", text: "Accept", disabled: draft.missing.length > 0 }),
+        draft.missing.length
+          ? el("span", { class: "muted", text: "Design every preset before accepting." })
+          : null,
+      ),
+    );
+  }
+
+  // --- Saved Voices -------------------------------------------------------------------------
+
+  async function refreshVoices() {
+    const voices = await api("GET", "/voices");
+    $("voices").replaceChildren(...voices.map(savedVoice));
+    $("no-voices").hidden = voices.length > 0;
+  }
+
+  function savedVoice(voice) {
+    const reload = async () => {
+      await refreshVoices();
+      setBusy(!jobBox.hidden);
+    };
+    return el(
+      "details",
+      { class: "card" },
+      el("summary", {}, el("strong", { text: voice.name }), " ", el("span", { class: "muted", text: Object.keys(voice.presets).join(", ") })),
+      el("p", { class: "muted", text: voice.description }),
+      ...Object.entries(voice.presets).map(([emotion, preset]) => savedPreset(voice, emotion, preset, reload)),
+      ...voice.pending.map((take) => pendingTake(voice, take, reload)),
+      addPresetForm(voice, reload),
+      el(
+        "div",
+        { class: "row" },
+        el("button", {
+          type: "button",
+          text: `Delete ${voice.name}`,
+          onclick: () =>
+            attempt(async () => {
+              if (!confirm(`Delete the Voice "${voice.name}" and all its clips?`)) return;
+              await api("DELETE", `/voices/${voice.id}`);
+              await reload();
+            }),
+        }),
+      ),
+    );
+  }
+
+  function savedPreset(voice, emotion, preset, reload) {
+    const base = `/voices/${voice.id}/presets/${emotion}`;
+    const tune = sliders(preset);
+    const locked = emotion === "neutral";
+    return el(
+      "div",
+      { class: "preset" },
+      el("strong", { text: emotion }),
+      player(preset.clip_url),
+      el("div", { class: "row" }, ...tune.nodes),
+      el(
+        "div",
+        { class: "row" },
+        jobButton("Hear these values", async () => {
+          await runJob(`${base}/retune`, tune.read());
+          await reload();
+        }),
+        locked
+          ? el("span", { class: "muted", text: "The neutral clip is locked." })
+          : jobButton("Regenerate", async () => {
+              await runJob(`${base}/regenerate`);
+              await reload();
+            }),
+        locked
+          ? null
+          : el("button", {
+              type: "button",
+              text: "Remove",
+              onclick: () =>
+                attempt(async () => {
+                  if (!confirm(`Remove the ${emotion} preset from ${voice.name}?`)) return;
+                  await api("DELETE", base);
+                  await reload();
+                }),
+            }),
+      ),
+    );
+  }
+
+  function pendingTake(voice, take, reload) {
+    const what =
+      take.kind === "preview"
+        ? `New values for ${take.emotion}: exaggeration ${take.exaggeration}, cfg ${take.cfg}`
+        : `New ${take.emotion} clip`;
+    const decide = (method, path) =>
+      attempt(async () => {
+        await api(method, path);
+        await reload();
+      });
+    return el(
+      "div",
+      { class: "pending" },
+      el("span", { text: `${what}. Keep it?` }),
+      player(take.url),
+      el(
+        "div",
+        { class: "row" },
+        el("button", { type: "button", text: "Accept", onclick: () => decide("POST", `/voices/${voice.id}/takes/${take.id}/accept`) }),
+        el("button", { type: "button", text: "Reject", onclick: () => decide("DELETE", `/voices/${voice.id}/takes/${take.id}`) }),
+      ),
+    );
+  }
+
+  function addPresetForm(voice, reload) {
+    const name = el("input", { type: "text", placeholder: "angry-soft", required: true });
+    const sample = el("input", { type: "text", maxlength: 500, placeholder: "Optional sample sentence" });
+    const tune = sliders(voice.presets.neutral);
+    const submit = el("button", { type: "submit", text: "Design it", dataset: { startsJob: "" } });
+    return el(
+      "form",
+      {
+        class: "preset",
+        onsubmit: (event) => {
+          event.preventDefault();
+          attempt(async () => {
+            await runJob(`/voices/${voice.id}/presets`, {
+              name: name.value,
+              sample: sample.value || null,
+              ...tune.read(),
+            });
+            await reload();
+          });
+        },
+      },
+      el("strong", { text: "Add an Emotion preset" }),
+      el("div", { class: "row" }, name, sample),
+      el("div", { class: "row" }, ...tune.nodes),
+      el("div", { class: "row" }, submit),
+    );
+  }
+
+  // --- Designing ----------------------------------------------------------------------------
+
+  $("design-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    attempt(async () => {
+      const description = $("design-description").value;
+      const result = await runJob("/voices/design", { description });
+      $("design-description").value = "";
+      await refreshDrafts();
+      await openDraft(result.draft_id);
+    });
+  });
+  $("design-form").querySelector("button").dataset.startsJob = "";
+
+  async function refresh() {
+    await Promise.all([refreshDrafts(), refreshVoices()]);
+    if (reviewing) await openDraft(reviewing);
+    setBusy(!jobBox.hidden);
+  }
+
+  attempt(async () => {
+    await refresh();
+    await followCurrentJob();
+  });
+})();
