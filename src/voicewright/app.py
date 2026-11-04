@@ -12,12 +12,22 @@ from starlette.background import BackgroundTask
 from voicewright.audio_converter import SUPPORTED, FfmpegMissing, UnsupportedAudio, convert
 from voicewright.config import ConfigError, load_config
 from voicewright.data_folder import DataFolder, MissingLinkTarget
-from voicewright.default_emotions import DEFAULT_EMOTIONS_FILE, load_default_emotions
-from voicewright.drafts import Draft, DraftStore
+from voicewright.default_emotions import (
+    CFG_RANGE,
+    DEFAULT_EMOTIONS_FILE,
+    EXAGGERATION_RANGE,
+    load_default_emotions,
+)
+from voicewright.drafts import Draft, DraftProblem, DraftStore
 from voicewright.engines import Engines, default_engines
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
-from voicewright.voice_design import design_draft_voice
+from voicewright.voice_design import (
+    design_draft_voice,
+    redesign_draft_voice,
+    regenerate_preset,
+    retune_preset,
+)
 
 # Long enough for a detailed description; Qwen is told the whole thing for every clip.
 MAX_DESCRIPTION = 500
@@ -62,7 +72,21 @@ class JobStarted(BaseModel):
 class PresetOut(BaseModel):
     exaggeration: float
     cfg: float
+    # The current Reference clip: a design take.
+    take: str
     clip_url: str
+
+
+class TakeOut(BaseModel):
+    id: str
+    emotion: str
+    kind: str  # "design" (a Reference clip) or "preview" (a retune, spoken by the speech model)
+    created: str
+    url: str
+    description: str | None = None
+    exaggeration: float | None = None
+    cfg: float | None = None
+    clip: str | None = None
 
 
 class DraftOut(BaseModel):
@@ -73,24 +97,40 @@ class DraftOut(BaseModel):
     presets: dict[str, PresetOut]
     # Emotions not designed yet: designing is still running, or stopped part way.
     missing: list[str]
+    # Every clip made for this draft, oldest first; none is deleted while the draft is open.
+    takes: list[TakeOut]
 
     @classmethod
     def of(cls, draft: Draft) -> "DraftOut":
+        def url(take_id: str) -> str:
+            return f"/voices/drafts/{draft.id}/takes/{take_id}"
+
         return cls(
             id=draft.id,
             description=draft.description,
             created=draft.created,
-            emotions=list(draft.emotions),
+            emotions=[emotion.name for emotion in draft.emotions],
             presets={
                 name: PresetOut(
                     exaggeration=preset.exaggeration,
                     cfg=preset.cfg,
-                    clip_url=f"/voices/drafts/{draft.id}/clips/{name}",
+                    take=preset.take,
+                    clip_url=url(preset.take),
                 )
                 for name, preset in draft.presets.items()
             },
             missing=list(draft.missing),
+            takes=[TakeOut(**take.__dict__, url=url(take.id)) for take in draft.takes],
         )
+
+
+class RetuneRequest(BaseModel):
+    exaggeration: float = Field(ge=EXAGGERATION_RANGE[0], le=EXAGGERATION_RANGE[1])
+    cfg: float = Field(ge=CFG_RANGE[0], le=CFG_RANGE[1])
+
+
+class ChooseTake(BaseModel):
+    take: str
 
 
 class ProgressOut(BaseModel):
@@ -185,14 +225,51 @@ def create_app(
         """A Draft voice: its description and the presets designed so far, with clip URLs."""
         return DraftOut.of(find_draft(draft_id))
 
-    @app.get("/voices/drafts/{draft_id}/clips/{emotion}")
-    def get_draft_clip(draft_id: str, emotion: str) -> FileResponse:
-        """One preset's Reference clip, as standard WAV."""
+    def find_emotion(draft: Draft, emotion: str) -> None:
+        if draft.emotion(emotion) is None:
+            raise HTTPException(404, f"the Draft voice has no {emotion} emotion")
+
+    @app.get("/voices/drafts/{draft_id}/takes/{take_id}")
+    def get_draft_take(draft_id: str, take_id: str) -> FileResponse:
+        """One take, as standard WAV."""
         find_draft(draft_id)
-        clip = drafts.clip_path(draft_id, emotion)
-        if clip is None:
-            raise HTTPException(404, f"Draft voice {draft_id} has no {emotion} clip")
-        return FileResponse(clip, media_type="audio/wav")
+        path = drafts.take_path(draft_id, take_id)
+        if path is None:
+            raise HTTPException(404, f"the Draft voice has no take {take_id}")
+        return FileResponse(path, media_type="audio/wav")
+
+    @app.post("/voices/drafts/{draft_id}/presets/{emotion}/regenerate", status_code=202)
+    def regenerate(draft_id: str, emotion: str) -> JobStarted:
+        """Design a new take of one preset, or of the neutral clip; the others stay as they are."""
+        find_emotion(find_draft(draft_id), emotion)
+        work = regenerate_preset(drafts, models, draft_id, emotion)
+        return JobStarted(job_id=jobs.start("voice design", work).id)
+
+    @app.post("/voices/drafts/{draft_id}/presets/{emotion}/retune", status_code=202)
+    def retune(draft_id: str, emotion: str, request: RetuneRequest) -> JobStarted:
+        """Hear a preset at new exaggeration and cfg values, which become its values."""
+        draft = find_draft(draft_id)
+        find_emotion(draft, emotion)
+        if emotion not in draft.presets:
+            raise HTTPException(409, f"the {emotion} preset has no clip yet; regenerate it first")
+        work = retune_preset(drafts, models, draft_id, emotion, request.exaggeration, request.cfg)
+        return JobStarted(job_id=jobs.start("retune", work).id)
+
+    @app.post("/voices/drafts/{draft_id}/redesign", status_code=202)
+    def redesign(draft_id: str, request: DesignRequest) -> JobStarted:
+        """Change the description, then design a new take of every preset from it."""
+        find_draft(draft_id)
+        work = redesign_draft_voice(drafts, models, draft_id, request.description)
+        return JobStarted(job_id=jobs.start("voice design", work).id)
+
+    @app.put("/voices/drafts/{draft_id}/presets/{emotion}")
+    def choose_take(draft_id: str, emotion: str, request: ChooseTake) -> DraftOut:
+        """Go back to an earlier designed take as this preset's Reference clip."""
+        find_emotion(find_draft(draft_id), emotion)
+        try:
+            return DraftOut.of(drafts.choose_take(draft_id, emotion, request.take))
+        except DraftProblem as problem:
+            raise HTTPException(409, str(problem)) from None
 
     @app.get("/jobs/current")
     def current_job() -> JobOut | None:
