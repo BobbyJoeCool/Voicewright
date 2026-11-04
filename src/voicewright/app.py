@@ -28,6 +28,7 @@ from voicewright.voice_design import (
     regenerate_preset,
     retune_preset,
 )
+from voicewright.voice_library import DraftIncomplete, NameTaken, Voice, VoiceLibrary
 
 # Long enough for a detailed description; Qwen is told the whole thing for every clip.
 MAX_DESCRIPTION = 500
@@ -124,6 +125,54 @@ class DraftOut(BaseModel):
         )
 
 
+class AcceptRequest(BaseModel):
+    draft_id: str
+    name: str = Field(max_length=60)
+
+    @field_validator("name")
+    @classmethod
+    def tidy(cls, name: str) -> str:
+        name = " ".join(name.split())
+        if not name:
+            raise ValueError("give the Voice a name, e.g. Old Narrator")
+        if any(not ch.isprintable() for ch in name):
+            raise ValueError("a Voice name can't hold control characters")
+        return name
+
+
+class SavedPresetOut(BaseModel):
+    exaggeration: float
+    cfg: float
+    sample: str
+    clip_url: str
+
+
+class VoiceOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    created: str
+    presets: dict[str, SavedPresetOut]
+
+    @classmethod
+    def of(cls, voice: Voice) -> "VoiceOut":
+        return cls(
+            id=voice.id,
+            name=voice.name,
+            description=voice.description,
+            created=voice.created,
+            presets={
+                name: SavedPresetOut(
+                    exaggeration=p.exaggeration,
+                    cfg=p.cfg,
+                    sample=p.sample,
+                    clip_url=f"/voices/{voice.id}/clips/{name}",
+                )
+                for name, p in voice.presets.items()
+            },
+        )
+
+
 class RetuneRequest(BaseModel):
     exaggeration: float = Field(ge=EXAGGERATION_RANGE[0], le=EXAGGERATION_RANGE[1])
     cfg: float = Field(ge=CFG_RANGE[0], le=CFG_RANGE[1])
@@ -183,6 +232,7 @@ def create_app(
     jobs = JobRunner()
     models = ModelManager(engines or default_engines())
     drafts = DraftStore(folder / "drafts")
+    library = VoiceLibrary(folder / "voices", drafts)
     app.state.jobs = jobs
     app.state.models = models
 
@@ -219,6 +269,46 @@ def create_app(
         if draft is None:
             raise HTTPException(404, f"no Draft voice {draft_id}")
         return draft
+
+    @app.get("/voices/drafts")
+    def list_drafts() -> list[DraftOut]:
+        """Every Draft voice still open, oldest first, so the page can offer resume or discard."""
+        return [DraftOut.of(draft) for draft in drafts.list()]
+
+    @app.delete("/voices/drafts/{draft_id}", status_code=204)
+    def discard_draft(draft_id: str) -> None:
+        """Discard a Draft voice and every take."""
+        if not drafts.discard(draft_id):
+            raise HTTPException(404, f"no Draft voice {draft_id}")
+
+    @app.post("/voices", status_code=201)
+    def accept_draft(request: AcceptRequest) -> VoiceOut:
+        """Save a Draft voice to the library under a name; the draft and its takes go."""
+        draft = find_draft(request.draft_id)
+        try:
+            return VoiceOut.of(library.accept(draft, request.name))
+        except (NameTaken, DraftIncomplete) as problem:
+            raise HTTPException(409, str(problem)) from None
+
+    @app.get("/voices")
+    def list_voices() -> list[VoiceOut]:
+        """Every saved Voice, by name, with its Emotion presets."""
+        return [VoiceOut.of(voice) for voice in library.list()]
+
+    @app.get("/voices/{voice_id}")
+    def get_voice(voice_id: str) -> VoiceOut:
+        voice = library.get(voice_id)
+        if voice is None:
+            raise HTTPException(404, f"no Voice {voice_id}")
+        return VoiceOut.of(voice)
+
+    @app.get("/voices/{voice_id}/clips/{emotion}")
+    def get_voice_clip(voice_id: str, emotion: str) -> FileResponse:
+        """A saved Emotion preset's Reference clip, as standard WAV."""
+        clip = library.clip_path(voice_id, emotion)
+        if clip is None:
+            raise HTTPException(404, f"no {emotion} preset on Voice {voice_id}")
+        return FileResponse(clip, media_type="audio/wav")
 
     @app.get("/voices/drafts/{draft_id}")
     def get_draft(draft_id: str) -> DraftOut:
