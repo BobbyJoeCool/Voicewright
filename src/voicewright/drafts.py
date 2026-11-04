@@ -14,6 +14,7 @@ never a half-written file. Draft voices are never cleared on startup.
 import json
 import os
 import re
+import shutil
 import tempfile
 import threading
 import uuid
@@ -191,6 +192,22 @@ class DraftStore:
             self._write(draft)
             return draft
 
+    def list(self) -> list[Draft]:
+        """Every Draft voice still open, oldest first: what the page offers to resume."""
+        found = []
+        for folder in self.root.iterdir() if self.root.is_dir() else ():
+            if DRAFT_ID.fullmatch(folder.name) and (draft := self.get(folder.name)):
+                found.append(draft)
+        return sorted(found, key=lambda draft: draft.created)
+
+    def discard(self, draft_id: str) -> bool:
+        """Remove a Draft voice and every take. False if there was no such draft."""
+        if not DRAFT_ID.fullmatch(draft_id) or not self._folder(draft_id).is_dir():
+            return False
+        with self._lock:
+            shutil.rmtree(self._folder(draft_id))
+        return True
+
     def take_path(self, draft_id: str, take_id: str) -> Path | None:
         draft = self.get(draft_id)
         take = draft.take(take_id) if draft else None
@@ -236,7 +253,7 @@ class DraftStore:
 
 
 def now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="microseconds")  # orders drafts made in one second
 
 
 def atomic_write(path: Path, content: bytes) -> None:
