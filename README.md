@@ -6,14 +6,18 @@
 Needs macOS with Python 3.11 or 3.12 (3.13 and newer won't work with the speech model).
 
 1. `brew install python@3.11 ffmpeg`
-2. `python3.11 -m venv .venv && .venv/bin/pip install -e '.[dev,speech]'`
+2. `python3.11 -m venv .venv && .venv/bin/pip install -e '.[dev,speech,voice-design]'`
 3. `.venv/bin/voicewright`
 
-The last step starts the app at <http://127.0.0.1:8765/> and opens it in your browser, then loads the speech model (Chatterbox) in the background. The first run downloads its weights from Hugging Face, about 4 GB; after that it loads in about 15 seconds and uses about 5 GB. `GET /jobs/current` shows the load while it runs, and a failed load is printed in the terminal. Without the `speech` extra the app still runs, but anything that needs speech says how to install it. To start without loading any model, for working on the page, set `VOICEWRIGHT_NO_MODELS=1`. Running it again while it's up just opens the page, unless `--config` names a config file other than the default one. Use `--port` to pick another port.
+The last step starts the app at <http://127.0.0.1:8765/> and opens it in your browser, then loads the speech model (Chatterbox) in the background. The first run downloads its weights from Hugging Face, about 4 GB; after that it loads in about 15 seconds and uses about 5 GB. `GET /jobs/current` shows the load while it runs, and a failed load is printed in the terminal. Without the `speech` or `voice-design` extra the app still runs, but anything that needs that model says how to install it. To start without loading any model, for working on the page, set `VOICEWRIGHT_NO_MODELS=1`. Running it again while it's up just opens the page, unless `--config` names a config file other than the default one. Use `--port` to pick another port.
 
 ### Convert a file
 
 The Convert panel on the page turns an audio or video file (MP3, M4A, FLAC, OGG, AAC, WAV, or a video with sound) into the app's standard WAV, 16-bit mono, and lets you play or download it. The same conversion is `POST /convert` with the file as a form upload named `file`.
+
+### Design a voice
+
+`POST /voices/design` with `{"description": "A gravelly older man, slow and calm."}` starts a job that designs a Draft voice. Qwen3-TTS designs the neutral clip, then one Emotion preset for each emotion in the Default emotion set (`GET /emotions/defaults`). The first run downloads its weights, about 8 GB. Follow the job at `GET /jobs/{id}`. Its result names the Draft voice: `GET /voices/drafts/{id}` lists its presets, and each preset's `clip_url` plays the clip. Draft voices are kept in the data folder's `drafts` folder and survive a restart.
 
 ### Settings and data
 
@@ -29,7 +33,7 @@ Before each commit, run the checks:
 
 Tests run the app in-process against a fresh temporary data folder, so they never touch your real config or data. Every engine is faked and no test loads a real model.
 
-The smoke test loads the real speech model, renders a short line and a 120-word passage, and saves them so you can listen. It's slow and runs only on Apple Silicon, so it's left out of the default run:
+The smoke tests load the real models. They render a short line and a 120-word passage, and design a whole Draft voice, then save the audio so you can listen. It's slow and runs only on Apple Silicon, so it's left out of the default run:
 
 ```sh
 .venv/bin/pytest -m smoke -s

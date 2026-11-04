@@ -24,6 +24,13 @@ class OutOfMemory(Exception):
     """A model ran out of memory. Real engines raise this for their library's own OOM error."""
 
 
+def raise_if_out_of_memory(error: RuntimeError) -> None:
+    """MLX and PyTorch report running out of memory as a RuntimeError; raise it as OutOfMemory."""
+    message = str(error).lower()
+    if "out of memory" in message or "insufficient memory" in message:
+        raise OutOfMemory(str(error)) from error
+
+
 class UnsupportedVocalEffect(Exception):
     """The vocal-effect engine can't render this effect; the Script checker warns before this."""
 
@@ -86,10 +93,6 @@ def not_available(model: str, reason: str) -> Callable[[], LargeModel]:
 
 def default_engines() -> Engines:
     """The engines a plain `voicewright` runs on."""
-    # Voice design (Qwen3-TTS) arrives in step 2.2.
-    load_voice_design = not_available(
-        "voice design model", "it isn't part of this version of Voicewright yet"
-    )
     if models_turned_off():
         off = f"models are turned off by {NO_MODELS}"
         return Engines(
@@ -97,10 +100,11 @@ def default_engines() -> Engines:
             load_voice_design=not_available("voice design model", off),
             vocal_effects=NoVocalEffects(),
         )
-    from voicewright import chatterbox_speech  # imports engines; loaded here to avoid a cycle
+    # These import engines; loaded here to avoid a cycle.
+    from voicewright import chatterbox_speech, qwen_voice_design
 
     return Engines(
         load_speech=chatterbox_speech.load,
-        load_voice_design=load_voice_design,
+        load_voice_design=qwen_voice_design.load,
         vocal_effects=NoVocalEffects(),
     )
