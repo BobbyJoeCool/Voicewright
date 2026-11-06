@@ -21,11 +21,14 @@
     #job { position: sticky; top: 0; background: #e8f0fe; border-radius: 6px; padding: 0.5rem 0.75rem; }
     label.slider { display: flex; gap: 0.4rem; align-items: center; }
     label.slider output { min-width: 2.5rem; }
+    input[type=search] { flex: 1; font: inherit; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .license-note { font-size: 0.85em; color: #555; }
   </style>
 </head>
 <body>
   <h1>Voicewright</h1>
-  <p>Sounds and Scripts are coming soon.</p>
+  <p>Scripts are coming soon.</p>
 
   <div id="job" role="status" aria-live="polite" hidden>
     <span id="job-message"></span> <progress id="job-progress" max="1"></progress>
@@ -58,6 +61,28 @@
     <div id="voices"></div>
   </section>
 
+  <section aria-labelledby="sounds-heading">
+    <h2 id="sounds-heading">Sounds</h2>
+    <p class="muted">A Sound effect in a Script, like <code>{explosion}</code>, plays the sound
+      saved under that name.</p>
+
+    <h3>Your Sound library</h3>
+    <p id="no-sounds" class="muted">No sounds yet. Find one on Freesound below.</p>
+    <div id="sounds"></div>
+
+    <h3 id="sound-search-heading">Find a sound on Freesound</h3>
+    <div id="sound-replacing" class="pending" hidden></div>
+    <form id="sound-search-form" class="row">
+      <label for="sound-query" class="visually-hidden">Search Freesound</label>
+      <input type="search" id="sound-query" maxlength="200" required placeholder="thunder">
+      <button type="submit">Search</button>
+    </form>
+    <p id="sound-search-error" class="error" role="alert" hidden></p>
+    <p id="sound-search-status" class="muted" role="status"></p>
+    <div id="sound-results"></div>
+    <div class="row"><button type="button" id="sound-more" hidden>More results</button></div>
+  </section>
+
   <section aria-labelledby="convert-heading">
     <h2 id="convert-heading">Convert</h2>
     <p>Turn an audio or video file (MP3, M4A, FLAC, OGG, AAC, WAV, or a video with sound)
@@ -74,7 +99,9 @@
     </div>
   </section>
 
+  <script src="/static/common.js"></script>
   <script src="/static/voices.js"></script>
+  <script src="/static/sounds.js"></script>
   <script>
     const form = document.getElementById("convert-form");
     const button = document.getElementById("convert-button");
