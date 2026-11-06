@@ -6,10 +6,11 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-# Written into a new config file. The Output cache (step 4.3) and the Freesound client (step 3.2)
-# read these settings once they exist.
+# Written into a new config file. The Output cache (step 4.3) reads its setting once it exists.
 DEFAULT_OUTPUT_CACHE_SIZE = 5
 DEFAULT_FREESOUND_API_KEY = ""
+# The Freesound API key can also come from the environment, which wins over the config file.
+FREESOUND_KEY_ENV = "FREESOUND_API_KEY"
 
 DATA_FOLDER_EXAMPLE = 'e.g. data_folder = "~/Voicewright"'
 
@@ -21,6 +22,7 @@ class ConfigError(Exception):
 @dataclass(frozen=True)
 class Config:
     data_folder: Path
+    freesound_api_key: str = ""
 
 
 def expand_home(text: str) -> Path:
@@ -75,7 +77,26 @@ def load_config(path: Path) -> Config:
         raise ConfigError(
             f"{path} needs data_folder to be a full path or start with ~, {DATA_FOLDER_EXAMPLE}"
         )
-    return Config(data_folder=folder)
+    key = values.get("freesound_api_key", "")
+    if not isinstance(key, str):
+        raise ConfigError(
+            f'{path} needs freesound_api_key in quotes, e.g. freesound_api_key = "abc123"'
+        )
+    return Config(data_folder=folder, freesound_api_key=key.strip())
+
+
+def freesound_api_key(path: Path) -> str:
+    """The Freesound API key: from the environment if set, else from the config file now.
+
+    Read each time it's needed, so a key added to the config file works without a restart.
+    """
+    from_env = os.environ.get(FREESOUND_KEY_ENV, "").strip()
+    if from_env:
+        return from_env
+    try:
+        return load_config(path).freesound_api_key
+    except ConfigError:
+        return ""
 
 
 def write_default_config(path: Path) -> None:

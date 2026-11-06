@@ -168,6 +168,11 @@ def assert_fails_with_a_plain_message(app, *expected_in_message, exit_code=1):
         pytest.param('data_folder = "~nosuchuser/x"\n', id="unknown-user-home"),
         pytest.param('data_folder = "/Users/Zoë"\n'.encode("latin-1"), id="not-utf-8"),
         pytest.param('data_folder = "/tmp/a\\u0000b"\n', id="null-character"),
+        pytest.param(
+            # Refused before the data folder is made, so this folder is never created.
+            'data_folder = "/tmp/voicewright-unused"\nfreesound_api_key = 123\n',
+            id="freesound-key-not-text",
+        ),
     ],
 )
 def test_a_bad_config_is_reported_by_file_name(launch_with_config, tmp_path, config_text):

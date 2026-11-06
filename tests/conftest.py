@@ -2,7 +2,7 @@ import json
 import os
 
 import pytest
-from fakes import FakeEngines
+from fakes import FakeEngines, FakeFreesound
 from fastapi.testclient import TestClient
 
 from voicewright.app import create_app
@@ -46,12 +46,14 @@ def write_config(config_path, data_folder):
     return write
 
 
-def run_app(config_path, fakes: FakeEngines | None = None):
+def run_app(config_path, fakes: FakeEngines | None = None, freesound=None):
     """The FastAPI app built from this config, run in-process (no server, no port).
 
-    Always on fake engines: no test loads a real model.
+    Always on fake engines: no test loads a real model. Freesound is the fake too unless a test
+    passes a real client (pointed at a local stand-in server, never the internet).
     """
-    return TestClient(create_app(config_path, (fakes or FakeEngines()).engines()))
+    engines = (fakes or FakeEngines()).engines()
+    return TestClient(create_app(config_path, engines, freesound=freesound or FakeFreesound()))
 
 
 @pytest.fixture
@@ -61,9 +63,15 @@ def fakes():
 
 
 @pytest.fixture
-def client(write_config, fakes):
+def freesound():
+    """The fake Freesound the `client` app uses: canned results, and how to make it fail."""
+    return FakeFreesound()
+
+
+@pytest.fixture
+def client(write_config, fakes, freesound):
     """The app running in-process against a fresh temp data folder, on fake engines."""
-    with run_app(write_config(), fakes) as client:
+    with run_app(write_config(), fakes, freesound) as client:
         yield client
 
 

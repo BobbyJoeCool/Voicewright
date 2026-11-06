@@ -36,7 +36,7 @@ Everything runs locally and uses free, open-source models. The only network use 
 | Speech and voice cloning | Chatterbox via `chatterbox-mlx` (`hybrid-mlx` backend: the `ChatterboxTTSMLX` class, loaded with `device="mps"`), MIT license | Tested, works |
 | Voice design from a text description, neutral clip and every emotion preset | Qwen3-TTS VoiceDesign via `mlx-audio` (`mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16`). VoxCPM2 also ran but sounded weaker and needs about 13GB | Chosen in step 0.2 |
 | Vocal effects in the speaker's voice | None in v1. Chatterbox Turbo (`chatterbox-tts`) runs on the M2 but only its chuckle was convincing (see Open questions and tests). Breeze TTS 2 ruled out: documented for Linux with NVIDIA CUDA only, and its weights are non-commercial | Deferred |
-| Sound effects | Local sound library, filled by searching Freesound in the app | Not started |
+| Sound effects | Local sound library, filled by searching Freesound in the app (high-quality previews; originals need OAuth2) | Built in phase 3 |
 | Audio conversion and assembly | ffmpeg through `pydub` | Not started |
 | Backend and UI | FastAPI, serving a local web page | Not started |
 
@@ -152,7 +152,11 @@ Tuning guidance from the `chatterbox-mlx` README:
 
 - Each entry has a name (the text inside `{}`), an audio file, its source, and its license.
 - To add a sound, the user searches Freesound in the app, previews results, and picks one. The app downloads it, converts it, and stores it with its license and attribution.
+- What the app downloads is Freesound's high-quality preview (OGG, about 192 kbps), not the original upload. An API key covers search, sound details, and previews; original files need OAuth2, a per-user login flow with a registered app and a redirect, which is a lot of machinery for a local app. A 192 kbps preview is plenty for sound effects in a mono WAV Output. Downloading originals through OAuth2 is a future feature.
 - One audio file per name in v1.
+- Names are lowercase letters, digits, `-` and `_`, starting with a letter or digit, up to 60 characters (`{door-slam}`). A name typed with capitals is the same sound.
+- Adding under a name already taken is refused; replacing is a separate action that keeps the name.
+- The API key comes from the `FREESOUND_API_KEY` environment variable, or else `freesound_api_key` in the config file, read on each search so a new key works without a restart.
 
 ## 7. Assembly
 
@@ -186,6 +190,9 @@ Generated audio is presented but not kept by default.
 | `GET /sounds` | List the sound library |
 | `GET /sounds/search` | Search Freesound |
 | `POST /sounds` | Download a Freesound result into the sound library |
+| `PUT /sounds/{name}` | Replace the sound behind a name with another Freesound result |
+| `DELETE /sounds/{name}` | Remove a sound |
+| `GET /sounds/{name}/audio` | Play a sound |
 | `POST /generate` | Validate a tagged script against a voice, then return the output |
 | `POST /outputs/{id}/save` | Copy a cached output and its sidecar to the saved folder |
 

@@ -4,14 +4,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
 from voicewright.audio_converter import SUPPORTED, FfmpegMissing, UnsupportedAudio, convert
-from voicewright.config import ConfigError, load_config
+from voicewright.config import FREESOUND_KEY_ENV, ConfigError, freesound_api_key, load_config
 from voicewright.data_folder import DataFolder, MissingLinkTarget
 from voicewright.default_emotions import (
     CFG_RANGE,
@@ -22,9 +22,23 @@ from voicewright.default_emotions import (
 from voicewright.default_emotions import NAME as EMOTION_NAME
 from voicewright.drafts import Draft, DraftProblem, DraftStore
 from voicewright.engines import Engines, default_engines
+from voicewright.freesound import (
+    Freesound,
+    FreesoundClient,
+    FreesoundSound,
+    FreesoundSoundMissing,
+    FreesoundUnavailable,
+)
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
-from voicewright.sound_library import Sound, SoundLibrary, SoundMissing
+from voicewright.sound_library import (
+    Credit,
+    Sound,
+    SoundExists,
+    SoundLibrary,
+    SoundMissing,
+    sound_name,
+)
 from voicewright.voice_design import (
     design_draft_voice,
     redesign_draft_voice,
@@ -264,6 +278,39 @@ class SoundOut(BaseModel):
         )
 
 
+class FreesoundSoundOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    author: str
+    license: str
+    url: str
+    duration: float
+    preview_url: str
+
+
+class SearchOut(BaseModel):
+    results: list[FreesoundSoundOut]
+    count: int
+    page: int
+    has_next: bool
+
+
+class AddSoundRequest(BaseModel):
+    freesound_id: int = Field(gt=0)
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def a_sound_name(cls, name: str) -> str:
+        return sound_name(name)
+
+
+class ReplaceSoundRequest(BaseModel):
+    freesound_id: int = Field(gt=0)
+
+
 class ProgressOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -289,8 +336,10 @@ def create_app(
     config_path: Path,
     engines: Engines | None = None,
     default_emotions_file: Path = DEFAULT_EMOTIONS_FILE,
+    freesound: Freesound | None = None,
 ) -> FastAPI:
-    """The app, on the given engines (the real ones unless a test passes fakes).
+    """The app, on the given engines and Freesound client (the real ones unless a test passes
+    fakes).
 
     Raises ConfigError, or DefaultEmotionsError for a broken Default emotion set file.
     """
@@ -316,8 +365,19 @@ def create_app(
     drafts = DraftStore(folder / "drafts")
     library = VoiceLibrary(folder / "voices", drafts)
     sounds = SoundLibrary(folder / "sounds")
+    if freesound is None:
+        freesound = FreesoundClient(
+            lambda: freesound_api_key(config_path),
+            key_hint=f"{config_path} as freesound_api_key (or the {FREESOUND_KEY_ENV} "
+            "environment variable)",
+        )
     app.state.jobs = jobs
     app.state.models = models
+
+    @app.exception_handler(FreesoundUnavailable)
+    def freesound_unavailable(request: Request, error: FreesoundUnavailable) -> JSONResponse:
+        # The rest of the app keeps working: only Freesound search and adding fail (story 35).
+        return JSONResponse(status_code=503, content={"detail": str(error), "reason": error.reason})
 
     @app.exception_handler(JobAlreadyRunning)
     def job_already_running(request: Request, error: JobAlreadyRunning) -> JSONResponse:
@@ -565,6 +625,75 @@ def create_app(
     def list_sounds() -> list[SoundOut]:
         """The Sound library, by name, with each sound's credit."""
         return [SoundOut.of(sound) for sound in sounds.list()]
+
+    @app.get("/sounds/search")
+    def search_freesound(
+        q: str = Query(min_length=1, max_length=200), page: int = Query(1, ge=1, le=1000)
+    ) -> SearchOut:
+        """One page of Freesound results, each with its preview and license (stories 26-28)."""
+        query = " ".join(q.split())
+        if not query:
+            raise HTTPException(422, "type what to search Freesound for")
+        found = freesound.search(query, page)
+        return SearchOut(
+            results=[FreesoundSoundOut.model_validate(s) for s in found.results],
+            count=found.count,
+            page=found.page,
+            has_next=found.has_next,
+        )
+
+    def fetched_from_freesound(freesound_id: int, work: Path) -> tuple[Path, Credit]:
+        """Download a Freesound sound into `work` as standard WAV, with its credit."""
+        try:
+            found: FreesoundSound = freesound.sound(freesound_id)
+            audio = freesound.download(found)
+        except FreesoundSoundMissing as missing:
+            raise HTTPException(404, str(missing)) from None
+        source, converted = work / "download", work / "sound.wav"
+        source.write_bytes(audio)
+        try:
+            convert(source, converted)
+        except UnsupportedAudio:
+            raise HTTPException(
+                502, f"Freesound's file for {found.title!r} has no audio Voicewright can read"
+            ) from None
+        except FfmpegMissing:
+            raise HTTPException(
+                503, "ffmpeg isn't installed, so sounds can't be converted; brew install ffmpeg"
+            ) from None
+        credit = Credit(
+            title=found.title,
+            author=found.author,
+            license=found.license,
+            source=found.url,
+            attribution=found.attribution,
+            freesound_id=found.id,
+        )
+        return converted, credit
+
+    @app.post("/sounds", status_code=201)
+    def add_sound(request: AddSoundRequest) -> SoundOut:
+        """Download a Freesound result, convert it, and keep it under a name (stories 29-31)."""
+        if sounds.get(request.name) is not None:
+            raise HTTPException(409, str(SoundExists(request.name)))
+        with tempfile.TemporaryDirectory(prefix="voicewright-sound-") as work:
+            wav_path, credit = fetched_from_freesound(request.freesound_id, Path(work))
+            try:
+                return SoundOut.of(sounds.add(request.name, wav_path, credit))
+            except SoundExists as taken:
+                raise HTTPException(409, str(taken)) from None
+
+    @app.put("/sounds/{name}")
+    def replace_sound(name: str, request: ReplaceSoundRequest) -> SoundOut:
+        """Swap the sound behind a name for another Freesound result, keeping the name."""
+        if sounds.get(name) is None:
+            raise HTTPException(404, f"the Sound library has no {{{name.strip().lower()}}}")
+        with tempfile.TemporaryDirectory(prefix="voicewright-sound-") as work:
+            wav_path, credit = fetched_from_freesound(request.freesound_id, Path(work))
+            try:
+                return SoundOut.of(sounds.replace(name, wav_path, credit))
+            except SoundMissing as missing:
+                raise HTTPException(404, str(missing)) from None
 
     @app.get("/sounds/{name}/audio")
     def get_sound_audio(name: str) -> FileResponse:

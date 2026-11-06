@@ -112,3 +112,71 @@ class FakeVoiceDesign:
 
 def load_error(model: str, reason: str = "the weights are missing") -> ModelLoadError:
     return ModelLoadError(model, reason)
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def freesound_result(sound_id: int, title: str, license: str = "Creative Commons 0"):
+    from voicewright.freesound import FreesoundSound
+
+    return FreesoundSound(
+        id=sound_id,
+        title=title,
+        author=f"artist{sound_id}",
+        license=license,
+        url=f"https://freesound.org/people/artist{sound_id}/sounds/{sound_id}/",
+        duration=0.5,
+        preview_url=f"https://cdn.freesound.org/previews/{sound_id}-hq.ogg",
+    )
+
+
+@dataclass
+class FakeFreesound:
+    """Canned Freesound: a few results with different licenses, each downloading as OGG, so
+    adding one goes through the Audio converter. Set `unavailable` to make every call fail."""
+
+    sounds: list = field(
+        default_factory=lambda: [
+            freesound_result(101, "Big Boom"),
+            freesound_result(202, "Distant Thunder", "Attribution 4.0"),
+            freesound_result(303, "Glass Break", "Attribution NonCommercial 4.0"),
+        ]
+    )
+    audio: bytes = field(default_factory=lambda: (FIXTURES / "tone.ogg").read_bytes())
+    unavailable: BaseException | None = None
+    searches: list[tuple[str, int]] = field(default_factory=list)
+    downloads: list[int] = field(default_factory=list)
+
+    def search(self, query: str, page: int = 1):
+        from voicewright.freesound import SearchPage
+
+        self._check()
+        self.searches.append((query, page))
+        words = query.lower().split()
+        hits = [s for s in self.sounds if any(w in s.title.lower() for w in words)]
+        start = (page - 1) * 2  # two per page, to exercise paging
+        return SearchPage(
+            results=hits[start : start + 2],
+            count=len(hits),
+            page=page,
+            has_next=len(hits) > start + 2,
+        )
+
+    def sound(self, sound_id: int):
+        from voicewright.freesound import FreesoundSoundMissing
+
+        self._check()
+        for sound in self.sounds:
+            if sound.id == sound_id:
+                return sound
+        raise FreesoundSoundMissing(sound_id)
+
+    def download(self, sound) -> bytes:
+        self._check()
+        self.downloads.append(sound.id)
+        return self.audio
+
+    def _check(self) -> None:
+        if self.unavailable is not None:
+            raise self.unavailable

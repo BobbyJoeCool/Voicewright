@@ -43,6 +43,8 @@ To edit a saved Voice, each of these starts a job that makes a pending take. The
 
 Sound effects in a Script, written `{explosion}`, play sounds from the local Sound library. Each sound is kept under its name in the data folder's `sounds` folder, as standard WAV with its credit: title, author, license, source, and an attribution line. Names are lowercase letters, digits, `-` and `_`, and are matched ignoring case, so `{Explosion}` and `{explosion}` are the same sound. `GET /sounds` lists the library, `GET /sounds/{name}/audio` plays a sound, and `DELETE /sounds/{name}` removes one.
 
+Sounds come from Freesound. Searching needs a free API key: get one at <https://freesound.org/apiv2/apply> and put it in the config file as `freesound_api_key`, or set `FREESOUND_API_KEY`. A new key works without a restart. `GET /sounds/search?q=thunder` returns a page of results, each with its preview URL and license. `POST /sounds` with `{"freesound_id": 12345, "name": "thunder"}` downloads that sound, converts it to standard WAV, and keeps it with its credit. A name already taken gets 409. `PUT /sounds/thunder` with `{"freesound_id": 67890}` replaces the sound behind a name. The app keeps Freesound's high-quality preview (OGG, about 192 kbps), since original files need a Freesound login (OAuth2). If there's no key, Freesound refuses it, or it can't be reached, these return 503 with a `reason` of `no_api_key`, `bad_api_key`, or `unreachable`, and the rest of the app keeps working offline.
+
 ### Settings and data
 
 On first run the app writes a config file to `~/.config/voicewright/config.toml` (or wherever `--config` points) and creates the app data folder it names, `~/Voicewright` by default, with `voices`, `drafts`, `sounds`, `cache`, and `saved` subfolders. To move the data folder, set `data_folder` to a full path or one starting with `~`. The config file also holds the Output cache size (5 to 10) and your Freesound API key, so it is created readable only by you. Keep it out of git.
@@ -57,7 +59,7 @@ Before each commit, run the checks:
 
 Tests run the app in-process against a fresh temporary data folder, so they never touch your real config or data. Every engine is faked and no test loads a real model.
 
-The smoke tests load the real models. They render a short line and a 120-word passage, and design a whole Draft voice, then save the audio so you can listen. It's slow and runs only on Apple Silicon, so it's left out of the default run:
+The smoke tests load the real models. They render a short line and a 120-word passage, and design a whole Draft voice, then save the audio so you can listen. With a Freesound key set, one more searches Freesound and adds a sound to a temporary library. It's slow and runs only on Apple Silicon, so it's left out of the default run:
 
 ```sh
 .venv/bin/pytest -m smoke -s
