@@ -39,6 +39,10 @@ To edit a saved Voice, each of these starts a job that makes a pending take. The
 
 `DELETE /voices/{id}/presets/{emotion}` removes any preset but neutral, and `DELETE /voices/{id}` deletes the Voice. The description can't be edited once the Voice is saved.
 
+### Sound library
+
+Sound effects in a Script, written `{explosion}`, play sounds from the local Sound library. Each sound is kept under its name in the data folder's `sounds` folder, as standard WAV with its credit: title, author, license, source, and an attribution line. Names are lowercase letters, digits, `-` and `_`, and are matched ignoring case, so `{Explosion}` and `{explosion}` are the same sound. `GET /sounds` lists the library, `GET /sounds/{name}/audio` plays a sound, and `DELETE /sounds/{name}` removes one.
+
 ### Settings and data
 
 On first run the app writes a config file to `~/.config/voicewright/config.toml` (or wherever `--config` points) and creates the app data folder it names, `~/Voicewright` by default, with `voices`, `drafts`, `sounds`, `cache`, and `saved` subfolders. To move the data folder, set `data_folder` to a full path or one starting with `~`. The config file also holds the Output cache size (5 to 10) and your Freesound API key, so it is created readable only by you. Keep it out of git.

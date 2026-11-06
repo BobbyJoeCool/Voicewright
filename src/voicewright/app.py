@@ -24,6 +24,7 @@ from voicewright.drafts import Draft, DraftProblem, DraftStore
 from voicewright.engines import Engines, default_engines
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
+from voicewright.sound_library import Sound, SoundLibrary, SoundMissing
 from voicewright.voice_design import (
     design_draft_voice,
     redesign_draft_voice,
@@ -234,6 +235,35 @@ class ChooseTake(BaseModel):
     take: str
 
 
+class CreditOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str
+    author: str
+    license: str
+    source: str
+    attribution: str
+    freesound_id: int | None = None
+
+
+class SoundOut(BaseModel):
+    name: str
+    added: str
+    duration: float
+    credit: CreditOut
+    audio_url: str
+
+    @classmethod
+    def of(cls, sound: Sound) -> "SoundOut":
+        return cls(
+            name=sound.name,
+            added=sound.added,
+            duration=sound.duration,
+            credit=CreditOut.model_validate(sound.credit),
+            audio_url=f"/sounds/{sound.name}/audio",
+        )
+
+
 class ProgressOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -285,6 +315,7 @@ def create_app(
     models = ModelManager(engines or default_engines())
     drafts = DraftStore(folder / "drafts")
     library = VoiceLibrary(folder / "voices", drafts)
+    sounds = SoundLibrary(folder / "sounds")
     app.state.jobs = jobs
     app.state.models = models
 
@@ -529,6 +560,27 @@ def create_app(
         if job.state is JobState.FAILED:
             raise HTTPException(409, f"the {job.kind} job has no result: {job.error}")
         return job.result
+
+    @app.get("/sounds")
+    def list_sounds() -> list[SoundOut]:
+        """The Sound library, by name, with each sound's credit."""
+        return [SoundOut.of(sound) for sound in sounds.list()]
+
+    @app.get("/sounds/{name}/audio")
+    def get_sound_audio(name: str) -> FileResponse:
+        """A sound's audio, as standard WAV. The name is matched ignoring case."""
+        path = sounds.audio_path(name)
+        if path is None:
+            raise HTTPException(404, f"the Sound library has no {{{name.lower()}}}")
+        return wav(path)
+
+    @app.delete("/sounds/{name}", status_code=204)
+    def remove_sound(name: str) -> None:
+        """Remove a sound from the library."""
+        try:
+            sounds.remove(name)
+        except SoundMissing as missing:
+            raise HTTPException(404, str(missing)) from None
 
     @app.get("/", include_in_schema=False)
     def home() -> FileResponse:
