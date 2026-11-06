@@ -42,11 +42,13 @@
         placeholder="A gravelly older man with a slow, calm, warm voice."></textarea>
       <div class="row"><button type="submit">Design</button></div>
     </form>
+    <p class="error" role="alert" hidden data-error-for="design"></p>
 
     <div id="drafts-area" hidden>
       <h3>Draft voices</h3>
       <p class="muted">Not yet saved. Resume one to review it, or discard it.</p>
       <div id="drafts"></div>
+      <p class="error" role="alert" hidden data-error-for="drafts"></p>
     </div>
 
     <div id="review" class="card" hidden></div>
