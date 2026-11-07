@@ -1,6 +1,7 @@
 import re
 import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -412,8 +413,9 @@ class OutputOut(BaseModel):
 
 
 def download_name(voice_name: str, created: str) -> str:
-    stamp = re.sub(r"[^0-9]", "", created[:19])  # 20261107143022
-    return f"{slug(voice_name)}-{stamp[:8]}-{stamp[8:14]}.wav"
+    """e.g. old-narrator-20261107-143022.wav, in local time like a Saved output's name."""
+    when = datetime.fromisoformat(created).astimezone()
+    return f"{slug(voice_name)}-{when:%Y%m%d-%H%M%S}.wav"
 
 
 class SavedOutputOut(BaseModel):

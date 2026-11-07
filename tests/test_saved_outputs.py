@@ -143,8 +143,10 @@ def test_an_output_downloads_under_a_readable_name(client, voice):
 
     response = client.get(output["audio_url"])
 
-    assert output["download_name"].startswith("old-narrator-")
-    assert output["download_name"].endswith(".wav")
+    from datetime import datetime
+
+    local = datetime.fromisoformat(output["created"]).astimezone()
+    assert output["download_name"] == f"old-narrator-{local:%Y%m%d-%H%M%S}.wav"
     assert f'filename="{output["download_name"]}"' in response.headers["content-disposition"]
 
 
