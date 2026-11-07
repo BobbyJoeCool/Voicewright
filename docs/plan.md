@@ -38,9 +38,9 @@ Done when: the check reports every problem in one request, a rejected Script sta
 
 ### Phase 5 — Finish v1
 
-Goal: a full offline smoke test, a manual QA pass, and a README demo. Vocal effects (5.1) were dropped from v1 after the spike.
+Goal: page styling with an app-window feel, a full offline smoke test, a manual QA pass, and a README demo. Vocal effects (5.1) were dropped from v1 after the spike.
 
-Done when: the smoke test passes on the M2 with Wi-Fi off, every user story is checked with bugs filed, and the README opens with the demo.
+Done when: the page is styled and runs in its own window, the smoke test passes on the M2 with Wi-Fi off, every user story is checked with bugs filed, and the README opens with the demo.
 
 ## Steps
 
@@ -57,6 +57,8 @@ Done when: the smoke test passes on the M2 with Wi-Fi off, every user story is c
 | 2.4 | #10 | Accept, discard, and resume Draft voices | `ready-for-agent` | #9 |
 | 2.5 | #11 | Edit a saved Voice | `ready-for-agent` | #10 |
 | 2.6 | #12 | Voices area of the page | `ready-for-agent` | #11 |
+| 2.7 | #37 | Voices page fixes from the 2.6 click-through | `ready-for-agent` | #12 |
+| 2.8 | #42 | Show a saved Voice's pending take under its emotion | `bug` | #37 |
 | 3.1 | #13 | Sound library storage | `ready-for-agent` | #4 |
 | 3.2 | #14 | Freesound search and add | `ready-for-agent` | #13 |
 | 3.3 | #15 | Sounds area of the page | `ready-for-agent` | #14 |
@@ -67,5 +69,6 @@ Done when: the smoke test passes on the M2 with Wi-Fi off, every user story is c
 | 4.5 | #20 | Scripts area of the page | `ready-for-agent` | #19, #12 |
 | 5.1 | #21 | ~~Chatterbox Turbo vocal effects~~ (closed: dropped from v1 in 0.2) | `wontfix` | — |
 | 5.2 | #22 | Full real-model smoke test | `ready-for-human` | #19 |
-| 5.3 | #23 | Manual QA pass of the page | `ready-for-human` | #20 |
-| 5.4 | #24 | README demo | `ready-for-agent` | #22 |
+| 5.3 | #23 | Manual QA pass of the page | `ready-for-human` | #20, #38 |
+| 5.4 | #24 | README demo | `ready-for-agent` | #22, #38 |
+| 5.5 | #38 | Page styling and an app-window feel (must land before v1.0) | `ready-for-agent` | #20 |
