@@ -4,9 +4,6 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
-  const jobBox = $("job");
-  const jobMessage = $("job-message");
-  const jobProgress = $("job-progress");
   const errorBox = $("voices-error");
 
   // The Draft voice open for review, if any.
@@ -14,7 +11,7 @@
   // Saved Voice cards the user has opened: they stay open when the list is rebuilt.
   const openVoices = new Set();
 
-  const { api, el, player } = window.Voicewright;
+  const { api, el, player, runJob, follow, setBusy, isBusy } = window.Voicewright;
 
   // Where an action's error shows: next to the control, in the errorSlot(key) rendered beside
   // it, or in the line at the top of the page when the action has no slot.
@@ -60,61 +57,7 @@
     audio.play().catch(() => {});
   }
 
-  // --- Jobs ---------------------------------------------------------------------------------
-
-  const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-
-  function showJob(job) {
-    const { step, total, message } = job.progress;
-    // Step `total` of `total` is the wrap-up after the last step (e.g. reloading the speech
-    // model): it gets no number, since "step 5 of 4" reads as a bug.
-    const counted = total && step < total;
-    jobMessage.textContent = counted ? `${message} (step ${step + 1} of ${total})` : message;
-    if (total) {
-      jobProgress.max = total;
-      jobProgress.value = Math.min(step, total);
-    } else {
-      jobProgress.removeAttribute("value"); // an indeterminate bar
-    }
-    jobBox.hidden = false;
-    setBusy(true);
-  }
-
-  function hideJob() {
-    jobBox.hidden = true;
-    setBusy(false);
-  }
-
-  // While a job runs, buttons that would start another are disabled: the server would say 409.
-  function setBusy(busy) {
-    for (const button of document.querySelectorAll("button[data-starts-job]")) {
-      button.disabled = busy;
-    }
-  }
-
-  async function follow(jobId) {
-    for (;;) {
-      const job = await api("GET", `/jobs/${jobId}`);
-      if (job.state !== "running") {
-        hideJob();
-        if (job.state === "failed") throw new Error(job.error);
-        return job.result;
-      }
-      showJob(job);
-      await sleep(700);
-    }
-  }
-
-  // Start a job with POST `path`, follow it to the end, and return its result.
-  async function runJob(path, body) {
-    setBusy(true); // at once, so a second click can't start a second job
-    try {
-      const { job_id } = await api("POST", path, body);
-      return await follow(job_id);
-    } finally {
-      hideJob();
-    }
-  }
+  // --- Jobs (the bar and runJob live in common.js) ------------------------------------
 
   // A job may already be running when the page opens: loading the speech model at startup, or
   // a design started before the page was reloaded.
@@ -360,12 +303,14 @@
     const voices = await api("GET", "/voices");
     $("voices").replaceChildren(...voices.map(savedVoice));
     $("no-voices").hidden = voices.length > 0;
+    // The Scripts area offers these Voices to pick from.
+    document.dispatchEvent(new CustomEvent("voicewright:voices", { detail: voices }));
   }
 
   function savedVoice(voice) {
     const reload = async () => {
       await refreshVoices();
-      setBusy(!jobBox.hidden);
+      setBusy(isBusy());
     };
     return el(
       "details",
@@ -479,6 +424,7 @@
       "form",
       {
         class: "preset",
+        dataset: { addPresetFor: voice.id },
         onsubmit: (event) => {
           event.preventDefault();
           attempt(async () => {
@@ -514,10 +460,26 @@
   });
   $("design-form").querySelector("button").dataset.startsJob = "";
 
+  // For the Scripts area: a Script uses an emotion this Voice lacks. Open the Voice's card at
+  // its Add an Emotion preset form, with the name filled in.
+  window.Voicewright.addEmotion = async (voiceId, name) => {
+    openVoices.add(voiceId);
+    await refreshVoices();
+    setBusy(isBusy());
+    const form = [...document.querySelectorAll("form[data-add-preset-for]")].find(
+      (f) => f.dataset.addPresetFor === voiceId,
+    );
+    if (!form) return;
+    const input = form.querySelector("input");
+    input.value = name;
+    form.scrollIntoView({ block: "center" });
+    input.focus();
+  };
+
   async function refresh() {
     await Promise.all([refreshDrafts(), refreshVoices()]);
     if (reviewing) await openDraft(reviewing);
-    setBusy(!jobBox.hidden);
+    setBusy(isBusy());
   }
 
   attempt(async () => {

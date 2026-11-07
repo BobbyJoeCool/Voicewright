@@ -58,5 +58,73 @@ window.Voicewright = (() => {
 
   const player = (url) => el("audio", { controls: true, preload: "none", src: url });
 
-  return { api, el, player };
+  // --- Jobs: one long operation at a time, shown in the bar at the top of the page ----------
+
+  const $ = (id) => document.getElementById(id);
+  const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+  function showJob(job) {
+    const { step, total, message } = job.progress;
+    // Step `total` of `total` is the wrap-up after the last step (e.g. reloading the speech
+    // model): it gets no number, since "step 5 of 4" reads as a bug. A Script counts Segments.
+    const counted = total && step < total;
+    const unit = job.kind === "script" ? "Segment" : "step";
+    $("job-message").textContent = counted ? `${message} (${unit} ${step + 1} of ${total})` : message;
+    const bar = $("job-progress");
+    if (total) {
+      bar.max = total;
+      bar.value = Math.min(step, total);
+    } else {
+      bar.removeAttribute("value"); // an indeterminate bar
+    }
+    $("job").hidden = false;
+    setBusy(true);
+  }
+
+  function hideJob() {
+    $("job").hidden = true;
+    setBusy(false);
+  }
+
+  // While a job runs, buttons that would start another are disabled: the server would say 409.
+  function setBusy(busy) {
+    for (const button of document.querySelectorAll("button[data-starts-job]")) {
+      button.disabled = busy;
+    }
+  }
+
+  // Follow a job to its end and return its result; a failed job throws its error. Every area
+  // hears when a job ends ("voicewright:job-finished"), to refresh what it shows.
+  async function follow(jobId) {
+    try {
+      for (;;) {
+        const job = await api("GET", `/jobs/${jobId}`);
+        if (job.state !== "running") {
+          hideJob();
+          document.dispatchEvent(new CustomEvent("voicewright:job-finished", { detail: job }));
+          if (job.state === "failed") throw new Error(job.error);
+          return job.result;
+        }
+        showJob(job);
+        await sleep(700);
+      }
+    } finally {
+      hideJob();
+    }
+  }
+
+  // Start a job with POST `path`, follow it to the end, and return its result.
+  async function runJob(path, body) {
+    setBusy(true); // at once, so a second click can't start a second job
+    try {
+      const { job_id } = await api("POST", path, body);
+      return await follow(job_id);
+    } finally {
+      hideJob();
+    }
+  }
+
+  const isBusy = () => !$("job").hidden;
+
+  return { api, el, player, runJob, follow, setBusy, isBusy };
 })();
