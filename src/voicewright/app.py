@@ -11,7 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
 from voicewright.audio_converter import SUPPORTED, FfmpegMissing, UnsupportedAudio, convert
-from voicewright.config import FREESOUND_KEY_ENV, ConfigError, freesound_api_key, load_config
+from voicewright.config import (
+    FREESOUND_KEY_ENV,
+    OUTPUT_CACHE_RANGE,
+    ConfigError,
+    freesound_api_key,
+    load_config,
+    save_output_cache_size,
+)
 from voicewright.data_folder import DataFolder, MissingLinkTarget
 from voicewright.default_emotions import (
     CFG_RANGE,
@@ -398,6 +405,15 @@ class OutputOut(BaseModel):
         )
 
 
+class SettingsOut(BaseModel):
+    output_cache_size: int
+    output_cache_range: tuple[int, int] = OUTPUT_CACHE_RANGE
+
+
+class SettingsRequest(BaseModel):
+    output_cache_size: int = Field(ge=OUTPUT_CACHE_RANGE[0], le=OUTPUT_CACHE_RANGE[1], strict=True)
+
+
 class ProgressOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -462,7 +478,9 @@ def create_app(
     drafts = DraftStore(folder / "drafts")
     library = VoiceLibrary(folder / "voices", drafts)
     sounds = SoundLibrary(folder / "sounds")
-    outputs = OutputCache(folder / "cache")
+    outputs = OutputCache(folder / "cache", config.output_cache_size)
+    # Temporary Outputs don't outlive the app (story 54); Draft voices do.
+    outputs.clear()
     if freesound is None:
         freesound = FreesoundClient(
             lambda: freesound_api_key(config_path),
@@ -874,6 +892,24 @@ def create_app(
         return FileResponse(
             path, media_type="audio/wav", filename="output.wav", content_disposition_type="inline"
         )
+
+    @app.get("/settings")
+    def get_settings() -> SettingsOut:
+        """The settings the page can change: how many recent Outputs to keep."""
+        return SettingsOut(output_cache_size=outputs.size)
+
+    @app.put("/settings")
+    def change_settings(request: SettingsRequest) -> SettingsOut:
+        """Change the Output cache size (5 to 10), in the config file too. A smaller size
+        removes the oldest Outputs past it at once."""
+        try:
+            save_output_cache_size(config_path, request.output_cache_size)
+        except OSError as error:
+            raise HTTPException(
+                500, f"can't save the setting to {config_path}: {error.strerror or error}"
+            ) from None
+        outputs.resize(request.output_cache_size)
+        return SettingsOut(output_cache_size=outputs.size)
 
     @app.get("/", include_in_schema=False)
     def home() -> FileResponse:

@@ -189,6 +189,8 @@ Generated audio is presented but not kept by default.
 3. A **Save** action copies an output into a separate **saved folder** that cleanup never touches, with a sidecar record of the script text, the Voice, the preset values used, and credits and licenses for every sound effect used.
 4. The output cache is cleared on app startup. The draft area is not.
 
+The cache size is `output_cache_size` in the config file (default 5). The page changes it through `PUT /settings`, which rewrites only that line of the file, keeping comments and the API key. A value outside 5 to 10 in the file stops startup with a message saying how to fix it, as other bad settings do.
+
 ## Backend endpoints (draft)
 
 | Endpoint | Purpose |
@@ -210,6 +212,7 @@ Generated audio is presented but not kept by default.
 | `POST /scripts/generate` | Check the Script (422, no job, if rejected), then start a job that renders it into one Output; progress counts Segments |
 | `GET /outputs` | List the Output cache, newest first, each with its record |
 | `GET /outputs/{id}`, `GET /outputs/{id}/audio` | One Output, and its audio |
+| `GET /settings`, `PUT /settings` | Read or change the Output cache size (5 to 10); a change is written to the config file, and a smaller size removes the oldest Outputs at once |
 | `POST /outputs/{id}/save` | Copy a cached output and its sidecar to the saved folder |
 
 ## Open questions and tests

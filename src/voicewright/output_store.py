@@ -4,6 +4,9 @@ Every Output goes into the temporary Output cache under the data folder's cache/
 per Output, named by its id, holding output.wav and output.json (the record of what made it:
 the Script, the Voice, the preset values used, and the credits of every sound used).
 
+The cache keeps the last N Outputs (the output_cache_size setting, 5 to 10): adding one past
+that removes the oldest, and the cache is emptied when the app starts (spec stories 50, 51, 54).
+
 Folders are written under a hidden name and renamed into place, so a listing never sees half
 an Output.
 """
@@ -37,11 +40,31 @@ class Output:
 
 
 class OutputCache:
-    """The temporary Output cache."""
+    """The temporary Output cache, keeping the newest `size` Outputs."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, size: int):
         self.root = root
+        self._size = size
         self._lock = threading.Lock()
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    def resize(self, size: int) -> None:
+        """Keep `size` Outputs from now on; a smaller size removes the oldest at once."""
+        with self._lock:
+            self._size = size
+            self._evict()
+
+    def clear(self) -> None:
+        """Remove every cached Output, and anything half written: done at startup."""
+        with self._lock:
+            for path in self.root.iterdir() if self.root.is_dir() else ():
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    path.unlink(missing_ok=True)
 
     def add(self, wav: Path, duration: float, record: dict) -> Output:
         """Keep the WAV at `wav` (moved, not copied) as a new Output with its record."""
@@ -58,7 +81,13 @@ class OutputCache:
             except BaseException:
                 shutil.rmtree(building, ignore_errors=True)
                 raise
+            self._evict()
         return output
+
+    def _evict(self) -> None:
+        """Remove the oldest Outputs past the size. Call with the lock held."""
+        for old in self.list()[self._size :]:
+            shutil.rmtree(self.root / old.id, ignore_errors=True)
 
     def list(self) -> list[Output]:
         """Every cached Output, newest first."""
