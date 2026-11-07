@@ -176,6 +176,10 @@ Tuning guidance from the `chatterbox-mlx` README:
 
 Sound effects play in sequence with speech in v1.
 
+Starting values (step 4.2, to tune by ear): 350 ms of silence between pieces, a 10 ms fade at each end of every piece against clicks, every piece brought to -20 dBFS RMS without its peak passing -1 dBFS, and everything resampled to the highest sample rate among the pieces (Chatterbox speaks at 24 kHz, Freesound previews are often 44.1 kHz).
+
+What a Script uses (each emotion's Reference clip and values, each sound and its credit) is copied when generation starts, so editing the Voice or the Sound library during the job doesn't change that Output.
+
 ## 8. Output storage
 
 Generated audio is presented but not kept by default.
@@ -203,7 +207,9 @@ Generated audio is presented but not kept by default.
 | `DELETE /sounds/{name}` | Remove a sound |
 | `GET /sounds/{name}/audio` | Play a sound |
 | `POST /scripts/check` | Check a Script against a Voice: 200 with `warnings`, or 422 listing `missing_emotions`, `missing_sounds`, and `parse_errors` |
-| `POST /generate` | Validate a tagged script against a voice, then return the output |
+| `POST /scripts/generate` | Check the Script (422, no job, if rejected), then start a job that renders it into one Output; progress counts Segments |
+| `GET /outputs` | List the Output cache, newest first, each with its record |
+| `GET /outputs/{id}`, `GET /outputs/{id}/audio` | One Output, and its audio |
 | `POST /outputs/{id}/save` | Copy a cached output and its sidecar to the saved folder |
 
 ## Open questions and tests

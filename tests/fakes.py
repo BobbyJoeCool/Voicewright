@@ -53,6 +53,9 @@ class FakeEngines:
     before_call: Callable[[int], None] | None = None
     loaded: set[str] = field(default_factory=set)
     most_loaded_at_once: int = 0
+    # The Reference clip each speech call was given, read when called: a Script's work folder
+    # is gone once its job ends.
+    speech_references: list[bytes] = field(default_factory=list)
 
     def engines(self) -> Engines:
         return Engines(
@@ -90,6 +93,8 @@ class FakeSpeech:
         fakes.load("speech")
 
     def speak(self, text: str, reference_clip: Path, exaggeration: float, cfg: float) -> bytes:
+        clip = Path(reference_clip)
+        self.fakes.speech_references.append(clip.read_bytes() if clip.is_file() else b"")
         return self.fakes.clip(
             "speech", text=text, reference_clip=reference_clip, exaggeration=exaggeration, cfg=cfg
         )

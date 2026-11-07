@@ -29,8 +29,10 @@ from voicewright.freesound import (
     FreesoundSoundMissing,
     FreesoundUnavailable,
 )
+from voicewright.generator import ScriptChanged, generate_output, prepare
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
+from voicewright.output_store import Output, OutputCache
 from voicewright.script import Problem, ScriptCheck, Segment
 from voicewright.script import check as check_script
 from voicewright.sound_library import (
@@ -367,6 +369,35 @@ class ScriptCheckOut(BaseModel):
         )
 
 
+class OutputOut(BaseModel):
+    """An Output in the cache, with what made it."""
+
+    id: str
+    created: str
+    duration: float
+    voice_name: str
+    script: str
+    presets: dict[str, dict[str, float]]
+    sounds: list[dict]
+    warnings: list[str]
+    audio_url: str
+
+    @classmethod
+    def of(cls, output: Output) -> "OutputOut":
+        record = output.record
+        return cls(
+            id=output.id,
+            created=output.created,
+            duration=output.duration,
+            voice_name=record["voice"]["name"],
+            script=record["script"],
+            presets=record["presets"],
+            sounds=record["sounds"],
+            warnings=record["warnings"],
+            audio_url=f"/outputs/{output.id}/audio",
+        )
+
+
 class ProgressOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -431,6 +462,7 @@ def create_app(
     drafts = DraftStore(folder / "drafts")
     library = VoiceLibrary(folder / "voices", drafts)
     sounds = SoundLibrary(folder / "sounds")
+    outputs = OutputCache(folder / "cache")
     if freesound is None:
         freesound = FreesoundClient(
             lambda: freesound_api_key(config_path),
@@ -801,6 +833,47 @@ def create_app(
         """Check a Script without generating anything: 200 when ready (with any warnings), or
         422 listing every missing emotion, missing sound, and parse error at once."""
         return ScriptCheckOut.of(checked_script(request)[1])
+
+    @app.post("/scripts/generate", status_code=202)
+    def generate(request: ScriptRequest) -> JobStarted:
+        """Check the Script, then start a job that renders it into one Output. A rejected
+        Script is a 422 (the same body as the check) and starts no job."""
+        voice, result = checked_script(request)
+        try:
+            prepared = prepare(result, voice, library, sounds)
+        except ScriptChanged as changed:
+            raise HTTPException(409, f"{changed}; check the Script again") from None
+        try:
+            job = jobs.start("script", generate_output(prepared, models, outputs))
+        except BaseException:
+            prepared.discard()
+            raise
+        return JobStarted(job_id=job.id)
+
+    def find_output(output_id: str) -> Output:
+        output = outputs.get(output_id)
+        if output is None:
+            raise HTTPException(404, f"no Output {output_id}; it may have been cleared")
+        return output
+
+    @app.get("/outputs")
+    def list_outputs() -> list[OutputOut]:
+        """The Output cache, newest first."""
+        return [OutputOut.of(output) for output in outputs.list()]
+
+    @app.get("/outputs/{output_id}")
+    def get_output(output_id: str) -> OutputOut:
+        return OutputOut.of(find_output(output_id))
+
+    @app.get("/outputs/{output_id}/audio")
+    def get_output_audio(output_id: str) -> FileResponse:
+        """An Output's audio, as standard WAV."""
+        path = outputs.audio_path(output_id)
+        if path is None:
+            raise HTTPException(404, f"no Output {output_id}; it may have been cleared")
+        return FileResponse(
+            path, media_type="audio/wav", filename="output.wav", content_disposition_type="inline"
+        )
 
     @app.get("/", include_in_schema=False)
     def home() -> FileResponse:
