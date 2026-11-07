@@ -425,8 +425,12 @@
       },
       el("summary", {}, el("strong", { text: voice.name }), " ", el("span", { class: "muted", text: Object.keys(voice.presets).join(", ") })),
       el("p", { class: "muted", text: voice.description }),
-      ...Object.entries(voice.presets).map(([emotion, preset]) => savedPreset(voice, emotion, preset, reload)),
-      ...voice.pending.map((take) => pendingTake(voice, take, reload)),
+      // A pending take shows under its emotion; one for a new emotion, above the Add form.
+      ...Object.entries(voice.presets).flatMap(([emotion, preset]) => [
+        savedPreset(voice, emotion, preset, reload),
+        ...voice.pending.filter((take) => take.emotion === emotion).map((take) => pendingTake(voice, take, reload)),
+      ]),
+      ...voice.pending.filter((take) => !(take.emotion in voice.presets)).map((take) => pendingTake(voice, take, reload)),
       addPresetForm(voice, reload),
       el(
         "div",

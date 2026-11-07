@@ -58,6 +58,7 @@ Done when: the page is styled and runs in its own window, the smoke test passes 
 | 2.5 | #11 | Edit a saved Voice | `ready-for-agent` | #10 |
 | 2.6 | #12 | Voices area of the page | `ready-for-agent` | #11 |
 | 2.7 | #37 | Voices page fixes from the 2.6 click-through | `ready-for-agent` | #12 |
+| 2.8 | #42 | Show a saved Voice's pending take under its emotion | `bug` | #37 |
 | 3.1 | #13 | Sound library storage | `ready-for-agent` | #4 |
 | 3.2 | #14 | Freesound search and add | `ready-for-agent` | #13 |
 | 3.3 | #15 | Sounds area of the page | `ready-for-agent` | #14 |
