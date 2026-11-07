@@ -189,6 +189,8 @@ Generated audio is presented but not kept by default.
 3. A **Save** action copies an output into a separate **saved folder** that cleanup never touches, with a sidecar record of the script text, the Voice, the preset values used, and credits and licenses for every sound effect used.
 4. The output cache is cleared on app startup. The draft area is not.
 
+A Saved output is two files side by side in `saved/`, named by its id: when it was saved, the Voice, and a short random part (`2026-11-07-143022-old-narrator-1a2b3c.wav` and `.json`). The sidecar holds the Script, the Voice (name, id, description), the exaggeration and cfg of each emotion the Script used, the credit of each sound used (name, title, author, license, source URL, attribution), the warnings, and the length. The record is built when generation starts, so the credits are those of the sounds actually used, even if one is replaced before saving.
+
 The cache size is `output_cache_size` in the config file (default 5). The page changes it through `PUT /settings`, which rewrites only that line of the file, keeping comments and the API key. A value outside 5 to 10 in the file stops startup with a message saying how to fix it, as other bad settings do.
 
 ## Backend endpoints (draft)
@@ -213,7 +215,9 @@ The cache size is `output_cache_size` in the config file (default 5). The page c
 | `GET /outputs` | List the Output cache, newest first, each with its record |
 | `GET /outputs/{id}`, `GET /outputs/{id}/audio` | One Output, and its audio |
 | `GET /settings`, `PUT /settings` | Read or change the Output cache size (5 to 10); a change is written to the config file, and a smaller size removes the oldest Outputs at once |
-| `POST /outputs/{id}/save` | Copy a cached output and its sidecar to the saved folder |
+| `POST /outputs/{id}/save` | Copy a cached Output to the saved folder with its sidecar record (201; saving it again gives back the first copy, 200) |
+| `GET /saved`, `GET /saved/{id}` | List Saved outputs, newest first, or get one, with its record |
+| `GET /saved/{id}/audio`, `GET /saved/{id}/record` | A Saved output's WAV, and its sidecar JSON |
 
 ## Open questions and tests
 

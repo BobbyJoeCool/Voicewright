@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -39,7 +39,7 @@ from voicewright.freesound import (
 from voicewright.generator import ScriptChanged, generate_output, prepare
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
-from voicewright.output_store import Output, OutputCache
+from voicewright.output_store import Output, OutputCache, SavedOutput, SavedOutputs, slug
 from voicewright.script import Problem, ScriptCheck, Segment
 from voicewright.script import check as check_script
 from voicewright.sound_library import (
@@ -388,9 +388,13 @@ class OutputOut(BaseModel):
     sounds: list[dict]
     warnings: list[str]
     audio_url: str
+    # A file name for downloading it, e.g. old-narrator-2026-11-07-143022.wav
+    download_name: str
+    # The Saved output it was saved as, if it has been.
+    saved_id: str | None = None
 
     @classmethod
-    def of(cls, output: Output) -> "OutputOut":
+    def of(cls, output: Output, saved_id: str | None = None) -> "OutputOut":
         record = output.record
         return cls(
             id=output.id,
@@ -402,6 +406,46 @@ class OutputOut(BaseModel):
             sounds=record["sounds"],
             warnings=record["warnings"],
             audio_url=f"/outputs/{output.id}/audio",
+            download_name=download_name(record["voice"]["name"], output.created),
+            saved_id=saved_id,
+        )
+
+
+def download_name(voice_name: str, created: str) -> str:
+    stamp = re.sub(r"[^0-9]", "", created[:19])  # 20261107143022
+    return f"{slug(voice_name)}-{stamp[:8]}-{stamp[8:14]}.wav"
+
+
+class SavedOutputOut(BaseModel):
+    """A Saved output and its sidecar record."""
+
+    id: str
+    saved: str
+    duration: float
+    voice_name: str
+    script: str
+    presets: dict[str, dict[str, float]]
+    sounds: list[dict]
+    warnings: list[str]
+    audio_url: str
+    record_url: str
+    download_name: str
+
+    @classmethod
+    def of(cls, saved: SavedOutput) -> "SavedOutputOut":
+        record = saved.record
+        return cls(
+            id=saved.id,
+            saved=saved.saved,
+            duration=float(record.get("duration", 0)),
+            voice_name=record.get("voice", {}).get("name", ""),
+            script=record.get("script", ""),
+            presets=record.get("presets", {}),
+            sounds=record.get("sounds", []),
+            warnings=record.get("warnings", []),
+            audio_url=f"/saved/{saved.id}/audio",
+            record_url=f"/saved/{saved.id}/record",
+            download_name=saved.audio_file,
         )
 
 
@@ -481,6 +525,7 @@ def create_app(
     outputs = OutputCache(folder / "cache", config.output_cache_size)
     # Temporary Outputs don't outlive the app (story 54); Draft voices do.
     outputs.clear()
+    saved_outputs = SavedOutputs(folder / "saved")
     if freesound is None:
         freesound = FreesoundClient(
             lambda: freesound_api_key(config_path),
@@ -874,14 +919,76 @@ def create_app(
             raise HTTPException(404, f"no Output {output_id}; it may have been cleared")
         return output
 
+    def output_out(output: Output, saved_as: dict[str, str] | None = None) -> OutputOut:
+        if saved_as is None:
+            saved_as = saved_index()
+        return OutputOut.of(output, saved_as.get(output.id))
+
+    def saved_index() -> dict[str, str]:
+        """Which cached Output each Saved output came from: Output id → Saved output id."""
+        return {
+            s.record["output_id"]: s.id for s in saved_outputs.list() if "output_id" in s.record
+        }
+
     @app.get("/outputs")
     def list_outputs() -> list[OutputOut]:
         """The Output cache, newest first."""
-        return [OutputOut.of(output) for output in outputs.list()]
+        saved_as = saved_index()
+        return [output_out(output, saved_as) for output in outputs.list()]
 
     @app.get("/outputs/{output_id}")
     def get_output(output_id: str) -> OutputOut:
-        return OutputOut.of(find_output(output_id))
+        return output_out(find_output(output_id))
+
+    @app.post("/outputs/{output_id}/save", status_code=201)
+    def save_output(output_id: str, response: Response) -> SavedOutputOut:
+        """Copy an Output into the saved folder with its sidecar record (stories 52, 53).
+        Saving it again gives back the first copy, with 200."""
+        output = find_output(output_id)
+        audio = outputs.audio_path(output_id)
+        if audio is None:
+            raise HTTPException(404, f"no Output {output_id}; it may have been cleared")
+        saved, new = saved_outputs.save(output, audio)
+        if not new:
+            response.status_code = 200
+        return SavedOutputOut.of(saved)
+
+    def find_saved(saved_id: str) -> SavedOutput:
+        saved = saved_outputs.get(saved_id)
+        if saved is None:
+            raise HTTPException(404, f"no Saved output {saved_id}")
+        return saved
+
+    @app.get("/saved")
+    def list_saved() -> list[SavedOutputOut]:
+        """Every Saved output, newest first."""
+        return [SavedOutputOut.of(saved) for saved in saved_outputs.list()]
+
+    @app.get("/saved/{saved_id}")
+    def get_saved(saved_id: str) -> SavedOutputOut:
+        return SavedOutputOut.of(find_saved(saved_id))
+
+    @app.get("/saved/{saved_id}/audio")
+    def get_saved_audio(saved_id: str) -> FileResponse:
+        """A Saved output's audio, as standard WAV."""
+        saved = find_saved(saved_id)
+        return FileResponse(
+            saved_outputs.root / saved.audio_file,
+            media_type="audio/wav",
+            filename=saved.audio_file,
+            content_disposition_type="inline",
+        )
+
+    @app.get("/saved/{saved_id}/record")
+    def get_saved_record(saved_id: str) -> FileResponse:
+        """A Saved output's sidecar record, as written."""
+        saved = find_saved(saved_id)
+        return FileResponse(
+            saved_outputs.root / saved.sidecar_file,
+            media_type="application/json",
+            filename=saved.sidecar_file,
+            content_disposition_type="inline",
+        )
 
     @app.get("/outputs/{output_id}/audio")
     def get_output_audio(output_id: str) -> FileResponse:
@@ -889,8 +996,12 @@ def create_app(
         path = outputs.audio_path(output_id)
         if path is None:
             raise HTTPException(404, f"no Output {output_id}; it may have been cleared")
+        output = find_output(output_id)
         return FileResponse(
-            path, media_type="audio/wav", filename="output.wav", content_disposition_type="inline"
+            path,
+            media_type="audio/wav",
+            filename=download_name(output.record["voice"]["name"], output.created),
+            content_disposition_type="inline",
         )
 
     @app.get("/settings")
