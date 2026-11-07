@@ -24,11 +24,16 @@
     input[type=search] { flex: 1; font: inherit; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
     .license-note { font-size: 0.85em; color: #555; }
+    .ok { color: #1b5e20; }
+    ul.problems, ul.warnings { margin: 0.4rem 0; padding-left: 1.2rem; }
+    ul.problems li, ul.warnings li { margin: 0.3rem 0; }
+    ul.warnings { color: #6d4c00; }
+    button.link { background: none; border: none; padding: 0; color: #0b57d0; text-decoration: underline; cursor: pointer; font: inherit; }
   </style>
 </head>
 <body>
   <h1>Voicewright</h1>
-  <p>Scripts are coming soon.</p>
+  <p>Design a Voice, gather sounds, then write a Script and hear it.</p>
 
   <div id="job" role="status" aria-live="polite" hidden>
     <span id="job-message"></span> <progress id="job-progress" max="1"></progress>
@@ -83,6 +88,45 @@
     <div class="row"><button type="button" id="sound-more" hidden>More results</button></div>
   </section>
 
+  <section aria-labelledby="scripts-heading">
+    <h2 id="scripts-heading">Scripts</h2>
+    <p class="muted">Write what the Voice says. <code>[angry]</code> changes the emotion until the
+      next tag; text before any tag is neutral. <code>{explosion}</code> plays that sound from your
+      Sound library. <code>(laugh)</code> is a Vocal effect: allowed, but skipped for now.</p>
+
+    <form id="script-form">
+      <label for="script-voice">Voice</label>
+      <div class="row">
+        <select id="script-voice"></select>
+        <span id="script-no-voices" class="muted" hidden>No saved Voices yet. Design one above.</span>
+      </div>
+      <label for="script-text">Script</label>
+      <textarea id="script-text" rows="8" maxlength="20000" spellcheck="true"
+        placeholder="The storm rolled in after dark. [angry] Get inside, now! {thunder} [sad] It was too late."></textarea>
+      <div class="row">
+        <button type="button" id="script-check">Check</button>
+        <button type="submit" id="script-generate" data-starts-job>Generate</button>
+      </div>
+    </form>
+    <p id="script-error" class="error" role="alert" hidden></p>
+    <div id="script-result" role="status" aria-live="polite"></div>
+
+    <h3>Recent Outputs</h3>
+    <div class="row">
+      <label for="cache-size">Keep the last</label>
+      <select id="cache-size"></select>
+      <span class="muted">until Voicewright restarts. Save the ones you want to keep.</span>
+    </div>
+    <p id="cache-error" class="error" role="alert" hidden></p>
+    <p id="no-outputs" class="muted">No Outputs yet.</p>
+    <div id="outputs"></div>
+
+    <h3>Saved outputs</h3>
+    <p id="no-saved" class="muted">Nothing saved yet. Saved outputs are kept, each with a record
+      of its Script, Voice, and sound credits.</p>
+    <div id="saved"></div>
+  </section>
+
   <section aria-labelledby="convert-heading">
     <h2 id="convert-heading">Convert</h2>
     <p>Turn an audio or video file (MP3, M4A, FLAC, OGG, AAC, WAV, or a video with sound)
@@ -102,6 +146,7 @@
   <script src="/static/common.js"></script>
   <script src="/static/voices.js"></script>
   <script src="/static/sounds.js"></script>
+  <script src="/static/scripts.js"></script>
   <script>
     const form = document.getElementById("convert-form");
     const button = document.getElementById("convert-button");
