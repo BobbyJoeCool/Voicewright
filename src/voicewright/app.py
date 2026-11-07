@@ -31,6 +31,8 @@ from voicewright.freesound import (
 )
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
+from voicewright.script import Problem, ScriptCheck, Segment
+from voicewright.script import check as check_script
 from voicewright.sound_library import (
     Credit,
     Sound,
@@ -57,6 +59,8 @@ from voicewright.voice_library import (
 
 # Long enough for a detailed description; Qwen is told the whole thing for every clip.
 MAX_DESCRIPTION = 500
+# About 3,000 words: a long chapter, which takes the speech model well over ten minutes.
+MAX_SCRIPT = 20_000
 
 STATIC_FOLDER = Path(__file__).parent / "static"
 HOME_PAGE = STATIC_FOLDER / "index.html"
@@ -311,6 +315,58 @@ class ReplaceSoundRequest(BaseModel):
     freesound_id: int = Field(gt=0)
 
 
+class ScriptRequest(BaseModel):
+    voice_id: str
+    script: str = Field(max_length=MAX_SCRIPT)
+
+
+class SegmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str  # "speech", "vocal_effect", or "sound_effect"
+    position: int
+    text: str | None = None
+    emotion: str | None = None
+    name: str | None = None
+
+
+class ProblemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    position: int
+    line: int
+    column: int
+    message: str
+
+
+class ScriptCheckOut(BaseModel):
+    """A Script check. The same shape whether it's ready (200) or rejected (422, with
+    `detail`), so the page reads both the same way."""
+
+    ready: bool
+    segments: list[SegmentOut]
+    missing_emotions: list[str]
+    missing_sounds: list[str]
+    parse_errors: list[ProblemOut]
+    warnings: list[ProblemOut]
+    detail: str | None = None
+
+    @classmethod
+    def of(cls, result: ScriptCheck) -> "ScriptCheckOut":
+        def out(items: list[Segment] | list[Problem], model):
+            return [model.model_validate(item) for item in items]
+
+        return cls(
+            ready=result.ready,
+            segments=out(result.segments, SegmentOut),
+            missing_emotions=result.missing_emotions,
+            missing_sounds=result.missing_sounds,
+            parse_errors=out(result.parse_errors, ProblemOut),
+            warnings=out(result.warnings, ProblemOut),
+            detail=None if result.ready else result.summary(),
+        )
+
+
 class ProgressOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -330,6 +386,14 @@ class JobOut(BaseModel):
     progress: ProgressOut
     result: Any = None
     error: str | None = None
+
+
+class ScriptRejected(Exception):
+    """A Script failed its check; the app answers 422 with the whole check."""
+
+    def __init__(self, result: ScriptCheck):
+        super().__init__(result.summary())
+        self.result = result
 
 
 def create_app(
@@ -361,7 +425,9 @@ def create_app(
 
     app = FastAPI(title="Voicewright")
     jobs = JobRunner()
-    models = ModelManager(engines or default_engines())
+    engines = engines or default_engines()
+    models = ModelManager(engines)
+    vocal_effects = engines.vocal_effects
     drafts = DraftStore(folder / "drafts")
     library = VoiceLibrary(folder / "voices", drafts)
     sounds = SoundLibrary(folder / "sounds")
@@ -710,6 +776,31 @@ def create_app(
             sounds.remove(name)
         except SoundMissing as missing:
             raise HTTPException(404, str(missing)) from None
+
+    def checked_script(request: ScriptRequest) -> tuple[Voice, ScriptCheck]:
+        """Check a Script against its Voice. A rejected Script raises a 422 listing every
+        problem (spec stories 41 to 44)."""
+        voice = find_voice(request.voice_id)
+        result = check_script(
+            request.script,
+            has_emotion=lambda emotion: emotion in voice.presets,
+            has_sound=lambda name: sounds.get(name) is not None,
+            supported_effects=vocal_effects.supported_effects,
+        )
+        if not result.ready:
+            raise ScriptRejected(result)
+        return voice, result
+
+    @app.exception_handler(ScriptRejected)
+    def script_rejected(request: Request, rejected: ScriptRejected) -> JSONResponse:
+        body = ScriptCheckOut.of(rejected.result)
+        return JSONResponse(status_code=422, content=body.model_dump())
+
+    @app.post("/scripts/check")
+    def check_a_script(request: ScriptRequest) -> ScriptCheckOut:
+        """Check a Script without generating anything: 200 when ready (with any warnings), or
+        422 listing every missing emotion, missing sound, and parse error at once."""
+        return ScriptCheckOut.of(checked_script(request)[1])
 
     @app.get("/", include_in_schema=False)
     def home() -> FileResponse:

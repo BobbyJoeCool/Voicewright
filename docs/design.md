@@ -125,6 +125,15 @@ Example: `[angry] I hate you! (scream) {explosion}` becomes:
 
 Untagged text uses the neutral preset.
 
+Parsing rules (step 4.1):
+
+- Names inside markers are matched ignoring case: `[Angry]` is `[angry]`, `{Door-Slam}` is `{door-slam}`.
+- An Emotion tag or Vocal effect is one word: lowercase letters, digits, `-` and `_`, starting with a letter. A Sound effect follows the sound-name rule in section 6.
+- A marker closes on its own line, before any other bracket. Otherwise it's a parse error at the opening bracket. So are a closing bracket with no opener, an empty marker, and a marker holding something that can't be a name (`(and then)`). Each error gives its character position and its line and column, and parsing carries on so every error is reported at once.
+- Whitespace inside speech is collapsed to single spaces; speech that is only whitespace is dropped.
+- A Script with nothing to say or play (empty, or only Vocal effects and tags) is rejected with a parse error.
+- An Emotion tag is checked against the Voice even if no speech follows it.
+
 Before any generation starts, the script is validated:
 
 - Every emotion tag must match an emotion preset on the chosen Voice.
@@ -193,6 +202,7 @@ Generated audio is presented but not kept by default.
 | `PUT /sounds/{name}` | Replace the sound behind a name with another Freesound result |
 | `DELETE /sounds/{name}` | Remove a sound |
 | `GET /sounds/{name}/audio` | Play a sound |
+| `POST /scripts/check` | Check a Script against a Voice: 200 with `warnings`, or 422 listing `missing_emotions`, `missing_sounds`, and `parse_errors` |
 | `POST /generate` | Validate a tagged script against a voice, then return the output |
 | `POST /outputs/{id}/save` | Copy a cached output and its sidecar to the saved folder |
 
