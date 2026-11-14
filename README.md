@@ -1,5 +1,28 @@
 # Voicewright
- An app using open source and free AI models that pipelines created AI voices and sound effects, and Turing text to speech using those crafted voices.
+
+Design a voice from a description, then have it read your Scripts, with emotions and sound effects, into one finished WAV. Everything runs locally on a Mac, using free and open-source AI models, and generation works offline.
+
+![The Scripts area: a tagged Script with an emotion change and a sound, and the finished Output playing](docs/media/scripts-area.png)
+
+**Hear it:** [sample-output.wav](docs/media/sample-output.wav) (23 s). This is an Output exactly as the app rendered it during the offline smoke test, unedited. The Voice was designed from *"A gravelly older man with a slow, calm, warm voice,"* and it reads this Script:
+
+```text
+The storm had been building all afternoon. {thunder}
+[angry] I told you to bring the animals in before dark!
+[sad] Now half of them are out there in the rain.
+```
+
+Thunder: ["Huge Thunder Crack [XY + MS]"](https://freesound.org/people/-CASK-/sounds/732992/) by -CASK-, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+## What it does
+
+- **Voices:** describe a voice in plain words. Qwen3-TTS designs a neutral Reference clip plus one Emotion preset each for angry, sad, and excited. Review each clip: regenerate it, tune its exaggeration and cfg, or go back to an earlier take. Then keep the Voice under a name.
+- **Sounds:** search Freesound from the page, preview each result and check its license, then add it to a local Sound library as standard WAV with its credit.
+- **Scripts:** write `[emotion]` and `{sound}` tags inline. Check lists every problem at once. Generate speaks each line with Chatterbox and assembles one WAV with short gaps and even volume.
+- **Outputs:** the last 5 to 10 Outputs are kept until restart. Save the ones you want, each with a JSON record of its Script, Voice, preset values, and sound credits.
+- **Convert:** turn any audio or video file into the app's standard WAV.
+
+See [CHANGELOG.md](CHANGELOG.md) for what each version added.
 
 ## Run it
 
@@ -69,7 +92,7 @@ Before each commit, run the checks:
 
 Tests run the app in-process against a fresh temporary data folder, so they never touch your real config or data. Every engine is faked and no test loads a real model.
 
-The smoke tests load the real models. They render a short line and a 120-word passage, and design a whole Draft voice, then save the audio so you can listen. With a Freesound key set, one more searches Freesound and adds a sound to a temporary library. It's slow and runs only on Apple Silicon, so it's left out of the default run:
+The smoke tests load the real models. They render a short line and a 120-word passage, and design a whole Draft voice, then save the audio so you can listen. With a Freesound key set, one more searches Freesound and adds a sound to a temporary library. The full smoke test (`tests/smoke/test_full_smoke.py`) runs the whole flow. It adds a sound, then designs a Voice, accepts it, renders a tagged Script, and saves the Output, all with every connection off this machine refused. Memory pressure must stay out of the red throughout. It's slow and runs only on Apple Silicon, so it's left out of the default run:
 
 ```sh
 .venv/bin/pytest -m smoke -s
