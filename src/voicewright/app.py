@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 import tempfile
@@ -357,7 +358,11 @@ def create_app(
 
     def wav(path: Path) -> FileResponse:
         # A saved preset's clip can be replaced: make the browser ask again each time.
-        return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "no-cache"})
+        base_real = os.path.realpath(folder)
+        target_real = os.path.realpath(path)
+        if os.path.commonpath([base_real, target_real]) != base_real:
+            raise HTTPException(404, "Invalid file path")
+        return FileResponse(target_real, media_type="audio/wav", headers={"Cache-Control": "no-cache"})
 
     @app.get("/voices")
     def list_voices() -> list[VoiceOut]:
@@ -474,7 +479,11 @@ def create_app(
         path = drafts.take_path(draft_id, take_id)
         if path is None:
             raise HTTPException(404, f"the Draft voice has no take {take_id}")
-        return FileResponse(path, media_type="audio/wav")
+        base_real = os.path.realpath(folder)
+        target_real = os.path.realpath(path)
+        if os.path.commonpath([base_real, target_real]) != base_real:
+            raise HTTPException(404, "Invalid file path")
+        return FileResponse(target_real, media_type="audio/wav")
 
     @app.post("/voices/drafts/{draft_id}/presets/{emotion}/regenerate", status_code=202)
     def regenerate(draft_id: str, emotion: str) -> JobStarted:
