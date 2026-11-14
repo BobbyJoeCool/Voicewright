@@ -3,7 +3,7 @@
 (() => {
   "use strict";
 
-  const { api, el, player } = window.Voicewright;
+  const { api, el, player, confirm, showArea } = window.Voicewright;
   const $ = (id) => document.getElementById(id);
 
   // The sound name being replaced, while the user picks a Freesound result for it.
@@ -75,6 +75,18 @@
   function librarySound(sound) {
     const { credit } = sound;
     const line = errorLine();
+    const remove = actionButton("Remove", "Removing…", line, async () => {
+      const sure = await confirm({
+        title: `Remove {${sound.name}}?`,
+        message: "Scripts that use it won't run until a sound is saved under that name again.",
+        action: "Remove",
+      });
+      if (!sure) return;
+      await api("DELETE", `/sounds/${sound.name}`);
+      if (replacing === sound.name) stopReplacing();
+      await refreshLibrary();
+    });
+    remove.classList.add("danger");
     return el(
       "div",
       { class: "preset", dataset: { sound: sound.name } },
@@ -90,15 +102,7 @@
         "div",
         { class: "row" },
         el("button", { type: "button", text: "Replace", onclick: () => startReplacing(sound.name) }),
-        actionButton("Remove", "Removing…", line, async () => {
-          const sure = confirm(
-            `Remove {${sound.name}} from the Sound library? Scripts that use it won't run until a sound is saved under that name again.`,
-          );
-          if (!sure) return;
-          await api("DELETE", `/sounds/${sound.name}`);
-          if (replacing === sound.name) stopReplacing();
-          await refreshLibrary();
-        }),
+        remove,
       ),
       line,
     );
@@ -107,6 +111,7 @@
   // --- Replacing ----------------------------------------------------------------------------
 
   function startReplacing(name) {
+    showArea("sounds");
     replacing = name;
     const banner = $("sound-replacing");
     banner.replaceChildren(
@@ -226,6 +231,7 @@
 
   // For the Scripts area (step 4.5): a Script names a missing sound; search Freesound for it.
   window.Voicewright.findSound = (name) => {
+    showArea("sounds");
     $("sound-query").value = name.replace(/[-_]+/g, " ");
     $("sound-search-heading").scrollIntoView({ block: "start" });
     runSearch($("sound-query").value, 1, name);

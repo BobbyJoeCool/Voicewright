@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voicewright"
-version = "0.1.0"
+version = "1.0.0"
 description = "Local web app that designs custom voices and turns tagged Scripts into finished audio."
 readme = "README.md"
 # chatterbox-mlx requires >=3.11,<3.13 (docs/design.md, Environment).

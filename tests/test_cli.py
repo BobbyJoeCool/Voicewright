@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from voicewright.cli import has_voicewright_title
+from voicewright import cli
+from voicewright.cli import app_window_command, has_voicewright_title, open_page
 
 # The installed console script, so a broken [project.scripts] entry fails these tests.
 VOICEWRIGHT = Path(sys.executable).parent / "voicewright"
@@ -541,3 +542,103 @@ def test_a_port_held_by_a_program_that_trickles_its_headers_is_reported(run_voic
         app = run_voicewright("--port", str(port))
 
         assert_fails_with_a_plain_message(app, f"port {port} is in use", "--port")
+
+
+def test_tab_opens_the_page_in_the_browser(run_voicewright, browser_log):
+    _, port = start_running(run_voicewright, "--tab")
+
+    assert wait_for_opens(browser_log, 1) == [f"http://127.0.0.1:{port}/"]
+
+
+def make_apps(folder: Path, *names: str) -> Path:
+    for name in names:
+        (folder / f"{name}.app").mkdir(parents=True)
+    return folder
+
+
+def test_on_the_mac_the_app_window_uses_the_first_browser_installed(tmp_path):
+    folder = make_apps(tmp_path, "Microsoft Edge", "Google Chrome")
+
+    command = app_window_command("http://127.0.0.1:1/", platform="darwin", app_folders=[folder])
+
+    app = str(folder / "Google Chrome.app")
+    assert command == ["open", "-na", app, "--args", "--app=http://127.0.0.1:1/"]
+
+
+def test_on_the_mac_browsers_in_the_home_applications_folder_count(tmp_path):
+    system, home = tmp_path / "system", make_apps(tmp_path / "home", "Microsoft Edge")
+    system.mkdir()
+
+    command = app_window_command("http://x/", platform="darwin", app_folders=[system, home])
+
+    assert command[2] == str(home / "Microsoft Edge.app")
+
+
+def test_without_an_app_window_browser_there_is_no_app_window(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+
+    assert app_window_command("http://x/", platform="darwin", app_folders=[tmp_path]) is None
+    assert app_window_command("http://x/", platform="linux") is None
+
+
+def test_off_the_mac_the_app_window_uses_a_browser_on_the_path(monkeypatch):
+    monkeypatch.setattr(
+        cli.shutil, "which", lambda name: "/usr/bin/chromium" if name == "chromium" else None
+    )
+
+    assert app_window_command("http://x/", platform="linux") == [
+        "/usr/bin/chromium",
+        "--app=http://x/",
+    ]
+
+
+@pytest.fixture
+def launches(monkeypatch):
+    """What open_page started: ("window", command) or ("tab", url), in order."""
+    calls = []
+    monkeypatch.setattr(cli, "app_window_command", lambda url: ["browser", f"--app={url}"])
+    monkeypatch.setattr(
+        cli.subprocess, "Popen", lambda command, **_: calls.append(("window", command))
+    )
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: calls.append(("tab", url)))
+    monkeypatch.delenv("BROWSER", raising=False)
+    return calls
+
+
+def test_the_page_opens_in_an_app_window_when_it_can(launches):
+    open_page("http://x/")
+
+    assert launches == [("window", ["browser", "--app=http://x/"])]
+
+
+def test_tab_skips_the_app_window(launches):
+    open_page("http://x/", tab=True)
+
+    assert launches == [("tab", "http://x/")]
+
+
+def test_a_browser_setting_skips_the_app_window(launches, monkeypatch):
+    monkeypatch.setenv("BROWSER", "firefox")
+
+    open_page("http://x/")
+
+    assert launches == [("tab", "http://x/")]
+
+
+def test_no_app_window_browser_falls_back_to_a_tab(launches, monkeypatch):
+    monkeypatch.setattr(cli, "app_window_command", lambda url: None)
+
+    open_page("http://x/")
+
+    assert launches == [("tab", "http://x/")]
+
+
+def test_a_browser_that_will_not_start_falls_back_to_a_tab(launches, monkeypatch):
+    def fail(command, **_):
+        raise OSError("not executable")
+
+    monkeypatch.setattr(cli.subprocess, "Popen", fail)
+
+    open_page("http://x/")
+
+    assert launches == [("tab", "http://x/")]

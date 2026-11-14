@@ -1,5 +1,5 @@
-// Helpers shared by the page's areas (Voices, Sounds): talking to the API and building elements.
-// Anything the user typed goes into the page as text, never HTML.
+// Helpers shared by the page's areas: talking to the API, building elements, the job bar, the
+// confirm dialog, and switching between areas. Anything the user typed goes in as text, never HTML.
 window.Voicewright = (() => {
   "use strict";
 
@@ -126,5 +126,75 @@ window.Voicewright = (() => {
 
   const isBusy = () => !$("job").hidden;
 
-  return { api, el, player, runJob, follow, setBusy, isBusy };
+  // --- Confirming: a styled in-page dialog in place of the browser's confirm() box -----------
+
+  // Ask before something that can't be undone. Resolves true when the user picks `action`;
+  // Cancel, Escape, or a click outside the dialog resolve false. Cancel has the focus, so a
+  // stray Enter keeps things as they are.
+  function confirmAction({ title, message, action = "OK" }) {
+    const dialog = $("confirm-dialog");
+    $("confirm-title").textContent = title;
+    $("confirm-message").textContent = message;
+    $("confirm-ok").textContent = action;
+    dialog.returnValue = "";
+    dialog.showModal();
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+    });
+  }
+
+  document.getElementById("confirm-dialog").addEventListener("click", (event) => {
+    // A click on the backdrop lands on the dialog itself, outside its form.
+    if (event.target === event.currentTarget) event.currentTarget.close("cancel");
+  });
+
+  // --- Areas: one of Voices, Sounds, Scripts, and Convert on show, named in the address ------
+
+  const AREAS = ["voices", "sounds", "scripts", "convert"];
+
+  function showArea(name) {
+    const area = AREAS.includes(name) ? name : AREAS[0];
+    for (const section of document.querySelectorAll("section.area")) {
+      section.hidden = section.dataset.area !== area;
+    }
+    for (const link of document.querySelectorAll(".nav-item")) {
+      if (link.dataset.area === area) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    }
+    const section = $(`area-${area}`);
+    $("area-title").textContent = area.charAt(0).toUpperCase() + area.slice(1);
+    $("area-blurb").textContent = section.dataset.blurb;
+    if (location.hash !== `#${area}`) history.replaceState(null, "", `#${area}`);
+  }
+
+  window.addEventListener("hashchange", () => {
+    showArea(location.hash.slice(1));
+    window.scrollTo({ top: 0 });
+  });
+  showArea(location.hash.slice(1));
+
+  // The counts beside Voices, Sounds, and Scripts in the sidebar.
+  const badge = (id) => (event) => {
+    const count = event.detail.length;
+    $(id).textContent = count ? String(count) : "";
+  };
+  document.addEventListener("voicewright:voices", badge("badge-voices"));
+  document.addEventListener("voicewright:sounds", badge("badge-sounds"));
+  document.addEventListener("voicewright:outputs", badge("badge-scripts"));
+
+  // --- Light and dark ------------------------------------------------------------------------
+
+  $("theme-toggle").addEventListener("click", () => {
+    const root = document.documentElement;
+    const current = root.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    const next = current === "light" ? "dark" : "light";
+    root.dataset.theme = next;
+    try {
+      localStorage.setItem("voicewright.theme", next);
+    } catch {
+      // Private windows may refuse storage; the theme still changes for this visit.
+    }
+  });
+
+  return { api, el, player, runJob, follow, setBusy, isBusy, confirm: confirmAction, showArea };
 })();
