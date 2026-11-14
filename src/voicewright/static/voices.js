@@ -11,7 +11,7 @@
   // Saved Voice cards the user has opened: they stay open when the list is rebuilt.
   const openVoices = new Set();
 
-  const { api, el, player, runJob, follow, setBusy, isBusy } = window.Voicewright;
+  const { api, el, player, runJob, follow, setBusy, isBusy, confirm, showArea } = window.Voicewright;
 
   // Where an action's error shows: next to the control, in the errorSlot(key) rendered beside
   // it, or in the line at the top of the page when the action has no slot.
@@ -73,6 +73,12 @@
 
   // --- Building the page --------------------------------------------------------------------
 
+  // A round badge with the Voice's initial, its color picked from the name so it stays the same.
+  function avatar(name) {
+    let hue = 0;
+    for (const char of name) hue = (hue * 31 + char.codePointAt(0)) % 360;
+    return el("span", { class: "avatar", style: `--hue: ${hue}`, "aria-hidden": "true", text: [...name.trim()][0]?.toUpperCase() ?? "?" });
+  }
 
   function jobButton(text, action, errorKey) {
     return el("button", {
@@ -114,7 +120,7 @@
             ? el("span", { class: "muted", text: `(missing ${draft.missing.join(", ")})` })
             : null,
           el("button", { type: "button", text: "Resume", onclick: () => attempt(() => openDraft(draft.id), "drafts") }),
-          el("button", { type: "button", text: "Discard", onclick: () => attempt(() => discard(draft), "drafts") }),
+          el("button", { type: "button", class: "danger", text: "Discard", onclick: () => attempt(() => discard(draft), "drafts") }),
         ),
       ),
     );
@@ -123,7 +129,12 @@
   }
 
   async function discard(draft) {
-    if (!confirm(`Discard the Draft voice "${draft.description}" and every take?`)) return;
+    const sure = await confirm({
+      title: "Discard this Draft voice?",
+      message: `"${draft.description}" and every take made for it will be deleted.`,
+      action: "Discard",
+    });
+    if (!sure) return;
     await api("DELETE", `/voices/drafts/${draft.id}`);
     if (reviewing === draft.id) closeReview();
     await refreshDrafts();
@@ -320,7 +331,17 @@
         ontoggle: (event) =>
           event.target.open ? openVoices.add(voice.id) : openVoices.delete(voice.id),
       },
-      el("summary", {}, el("strong", { text: voice.name }), " ", el("span", { class: "muted", text: Object.keys(voice.presets).join(", ") })),
+      el(
+        "summary",
+        {},
+        avatar(voice.name),
+        el(
+          "span",
+          { class: "voice-title" },
+          el("strong", { text: voice.name }),
+          el("span", { class: "chips" }, ...Object.keys(voice.presets).map((e) => el("span", { class: "chip emotion", text: e }))),
+        ),
+      ),
       el("p", { class: "muted", text: voice.description }),
       // A pending take shows under its emotion; one for a new emotion, above the Add form.
       ...Object.entries(voice.presets).flatMap(([emotion, preset]) => [
@@ -334,10 +355,16 @@
         { class: "row" },
         el("button", {
           type: "button",
+          class: "danger",
           text: `Delete ${voice.name}`,
           onclick: () =>
             attempt(async () => {
-              if (!confirm(`Delete the Voice "${voice.name}" and all its clips?`)) return;
+              const sure = await confirm({
+                title: `Delete ${voice.name}?`,
+                message: "The Voice and all its clips will be deleted. Scripts that use it will need another Voice.",
+                action: "Delete",
+              });
+              if (!sure) return;
               await api("DELETE", `/voices/${voice.id}`);
               openVoices.delete(voice.id);
               await reload();
@@ -376,10 +403,16 @@
           ? null
           : el("button", {
               type: "button",
+              class: "danger",
               text: "Remove",
               onclick: () =>
                 attempt(async () => {
-                  if (!confirm(`Remove the ${emotion} preset from ${voice.name}?`)) return;
+                  const sure = await confirm({
+                    title: `Remove ${emotion}?`,
+                    message: `The ${emotion} preset and its clip will be removed from ${voice.name}.`,
+                    action: "Remove",
+                  });
+                  if (!sure) return;
                   await api("DELETE", base);
                   await reload();
                 }, key),
@@ -409,7 +442,7 @@
         "div",
         { class: "row" },
         el("button", { type: "button", text: "Accept", onclick: () => decide("POST", `/voices/${voice.id}/takes/${take.id}/accept`) }),
-        el("button", { type: "button", text: "Reject", onclick: () => decide("DELETE", `/voices/${voice.id}/takes/${take.id}`) }),
+        el("button", { type: "button", class: "danger", text: "Reject", onclick: () => decide("DELETE", `/voices/${voice.id}/takes/${take.id}`) }),
       ),
       errorSlot(key),
     );
@@ -463,6 +496,7 @@
   // For the Scripts area: a Script uses an emotion this Voice lacks. Open the Voice's card at
   // its Add an Emotion preset form, with the name filled in.
   window.Voicewright.addEmotion = async (voiceId, name) => {
+    showArea("voices");
     openVoices.add(voiceId);
     await refreshVoices();
     setBusy(isBusy());

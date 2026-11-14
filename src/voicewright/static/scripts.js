@@ -11,6 +11,24 @@
   // The Script and Voice being written survive a reload of the page.
   const SAVED_SCRIPT = "voicewright.script";
   const SAVED_VOICE = "voicewright.script-voice";
+  // Storage can be refused (a private window); the page works without it.
+  const recall = (key) => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const remember = (key, value) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // Not kept for next time; nothing else depends on it.
+    }
+  };
+  // The saved Voices and library sounds, for the tag palette under the Script box.
+  let voices = [];
+  let sounds = [];
 
   // --- Small pieces -------------------------------------------------------------------------
 
@@ -39,13 +57,104 @@
 
   // --- Voices to pick from ------------------------------------------------------------------
 
-  function showVoices(voices) {
+  function showVoices(list) {
+    voices = list;
     const select = $("script-voice");
-    const chosen = select.value || localStorage.getItem(SAVED_VOICE);
+    const chosen = select.value || recall(SAVED_VOICE);
     select.replaceChildren(...voices.map((v) => el("option", { value: v.id, text: v.name })));
     if (voices.some((v) => v.id === chosen)) select.value = chosen;
     $("script-no-voices").hidden = voices.length > 0;
     select.hidden = voices.length === 0;
+    showPalette();
+  }
+
+  // --- The Script box -----------------------------------------------------------------------
+
+  // The Script box is a textarea over a colored copy of its text. The coloring follows the
+  // parser's rules (script.py): a tag opens with [ ( or {, closes on the same line before any
+  // other bracket, and holds one name. A tag the parser would refuse gets a wavy underline.
+  const MARKERS = { "[": ["]", "tok-emotion", /^[a-z][a-z0-9_-]*$/], "(": [")", "tok-effect", /^[a-z][a-z0-9_-]*$/], "{": ["}", "tok-sound", /^[a-z0-9][a-z0-9_-]{0,59}$/] };
+  const CLOSERS = new Set(["]", ")", "}"]);
+  const MAX_LENGTH = Number($("script-text").getAttribute("maxlength"));
+
+  function closeOf(script, start, close) {
+    for (let j = start + 1; j < script.length; j++) {
+      const char = script[j];
+      if (char === close) return j;
+      if (char === "\n" || char in MARKERS || CLOSERS.has(char)) return -1;
+    }
+    return -1;
+  }
+
+  // The Script as text nodes and colored spans: never HTML, so typed markup stays as typed.
+  function highlighted(script) {
+    const nodes = [];
+    let plain = 0;
+    const flush = (end) => {
+      if (end > plain) nodes.push(document.createTextNode(script.slice(plain, end)));
+    };
+    const mark = (start, end, className) => {
+      flush(start);
+      nodes.push(el("span", { class: className, text: script.slice(start, end) }));
+      plain = end;
+    };
+    for (let i = 0; i < script.length; i++) {
+      const char = script[i];
+      if (CLOSERS.has(char)) {
+        mark(i, i + 1, "tok-unknown");
+      } else if (char in MARKERS) {
+        const [close, className, pattern] = MARKERS[char];
+        const end = closeOf(script, i, close);
+        if (end === -1) {
+          mark(i, i + 1, "tok-unknown");
+        } else {
+          const name = script.slice(i + 1, end).trim().toLowerCase();
+          mark(i, end + 1, pattern.test(name) ? className : `${className} tok-unknown`);
+          i = end;
+        }
+      }
+    }
+    flush(script.length);
+    // A trailing newline needs something after it, or the copy ends a line short of the box.
+    nodes.push(document.createTextNode("\u200b"));
+    return nodes;
+  }
+
+  function showEditor() {
+    const text = $("script-text");
+    $("script-highlight").replaceChildren(...highlighted(text.value));
+    // The box grows with the Script instead of scrolling inside itself.
+    text.style.height = "auto";
+    if (text.scrollHeight) text.style.height = `${text.scrollHeight}px`;
+    const count = text.value.length;
+    $("script-count").textContent = `${count.toLocaleString()} / ${MAX_LENGTH.toLocaleString()} characters`;
+  }
+
+  // Put `tag` in the Script at the cursor, with a space before it where words would touch.
+  function insertTag(tag) {
+    const text = $("script-text");
+    const { selectionStart: start, selectionEnd: end, value } = text;
+    const before = start > 0 && !/\s/.test(value[start - 1]) ? " " : "";
+    const after = end < value.length && !/\s/.test(value[end]) ? " " : "";
+    text.focus();
+    text.setRangeText(`${before}${tag}${after}`, start, end, "end");
+    text.dispatchEvent(new Event("input"));
+  }
+
+  // One-click tags: the chosen Voice's emotions and the library's sounds.
+  function showPalette() {
+    const voice = voices.find((v) => v.id === $("script-voice").value);
+    const emotions = voice ? Object.keys(voice.presets) : [];
+    const row = (label, chips) =>
+      chips.length ? el("div", { class: "chips" }, el("span", { class: "palette-label", text: label }), ...chips) : null;
+    const chip = (kind, tag) =>
+      el("button", { type: "button", class: `chip ${kind}`, text: tag, title: `Insert ${tag}`, onclick: () => insertTag(tag) });
+    $("script-palette").replaceChildren(
+      ...[
+        row("Emotions", emotions.map((e) => chip("emotion", `[${e}]`))),
+        row("Sounds", sounds.map((s) => chip("sound", `{${s.name}}`))),
+      ].filter(Boolean),
+    );
   }
 
   // --- Checking -----------------------------------------------------------------------------
@@ -164,12 +273,14 @@
     const outputs = await api("GET", "/outputs");
     $("outputs").replaceChildren(...outputs.map(outputCard));
     $("no-outputs").hidden = outputs.length > 0;
+    // The sidebar shows how many Outputs there are.
+    document.dispatchEvent(new CustomEvent("voicewright:outputs", { detail: outputs }));
   }
 
   function outputCard(output) {
     const line = el("p", { class: "error", role: "alert", hidden: true });
     const save = output.saved_id
-      ? el("span", { class: "muted", text: "Saved" })
+      ? el("span", { class: "saved-tag", text: "Saved" })
       : el("button", {
           type: "button",
           text: "Save",
@@ -189,15 +300,19 @@
     return el(
       "div",
       { class: "card", dataset: { output: output.id } },
-      el("strong", { text: output.voice_name }),
-      el("span", { class: "muted", text: ` · ${when(output.created)} · ${seconds(output.duration)}` }),
-      el("p", { class: "muted", text: excerpt(output.script) }),
+      el(
+        "div",
+        { class: "output-meta" },
+        el("strong", { text: output.voice_name }),
+        el("span", { class: "muted", text: `${when(output.created)} · ${seconds(output.duration)}` }),
+      ),
+      el("p", { class: "excerpt", text: excerpt(output.script) }),
       player(output.audio_url),
       el(
         "div",
         { class: "row" },
         save,
-        el("a", { href: output.audio_url, download: output.download_name, text: "Download WAV" }),
+        el("a", { class: "button download", href: output.audio_url, download: output.download_name, text: "Download WAV" }),
       ),
       line,
     );
@@ -216,16 +331,20 @@
     return el(
       "div",
       { class: "card", dataset: { saved: saved.id } },
-      el("strong", { text: saved.voice_name }),
-      el("span", { class: "muted", text: ` · saved ${when(saved.saved)} · ${seconds(saved.duration)}` }),
-      el("p", { class: "muted", text: excerpt(saved.script) }),
+      el(
+        "div",
+        { class: "output-meta" },
+        el("strong", { text: saved.voice_name }),
+        el("span", { class: "muted", text: `saved ${when(saved.saved)} · ${seconds(saved.duration)}` }),
+      ),
+      el("p", { class: "excerpt", text: excerpt(saved.script) }),
       credits,
       player(saved.audio_url),
       el(
         "div",
         { class: "row" },
-        el("a", { href: saved.audio_url, download: saved.download_name, text: "Download WAV" }),
-        el("a", { href: saved.record_url, target: "_blank", rel: "noopener", text: "Record (JSON)" }),
+        el("a", { class: "button download", href: saved.audio_url, download: saved.download_name, text: "Download WAV" }),
+        el("a", { class: "button", href: saved.record_url, target: "_blank", rel: "noopener", text: "Record (JSON)" }),
       ),
     );
   }
@@ -260,10 +379,26 @@
     event.preventDefault();
     generate();
   });
-  $("script-text").value = localStorage.getItem(SAVED_SCRIPT) ?? "";
-  $("script-text").addEventListener("input", () => localStorage.setItem(SAVED_SCRIPT, $("script-text").value));
+  const text = $("script-text");
+  text.value = recall(SAVED_SCRIPT) ?? "";
+  text.addEventListener("input", () => {
+    remember(SAVED_SCRIPT, text.value);
+    showEditor();
+  });
+  // ⌘Enter (Ctrl+Enter off the Mac) generates, unless a job is already running.
+  text.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      if (!$("script-generate").disabled) $("script-form").requestSubmit();
+    }
+  });
+  // The Scripts area may be hidden when the page opens; size the box once it shows.
+  window.addEventListener("hashchange", showEditor);
+  window.addEventListener("resize", showEditor);
+  showEditor();
   $("script-voice").addEventListener("change", () => {
-    localStorage.setItem(SAVED_VOICE, $("script-voice").value);
+    remember(SAVED_VOICE, $("script-voice").value);
+    showPalette();
     lastCheck = null;
     $("script-result").replaceChildren();
   });
@@ -272,7 +407,11 @@
     showVoices(event.detail);
     recheckIfMissing();
   });
-  document.addEventListener("voicewright:sounds", recheckIfMissing);
+  document.addEventListener("voicewright:sounds", (event) => {
+    sounds = event.detail;
+    showPalette();
+    recheckIfMissing();
+  });
   // A Script job followed from elsewhere (one already running when the page opened) ends here too.
   document.addEventListener("voicewright:job-finished", (event) => {
     if (event.detail.kind === "script") refreshOutputs().catch(() => {});

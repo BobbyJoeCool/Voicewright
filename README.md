@@ -9,7 +9,9 @@ Needs macOS with Python 3.11 or 3.12 (3.13 and newer won't work with the speech 
 2. `python3.11 -m venv .venv && .venv/bin/pip install -e '.[dev,speech,voice-design]'`
 3. `.venv/bin/voicewright`
 
-The last step starts the app at <http://127.0.0.1:8765/> and opens it in your browser, then loads the speech model (Chatterbox) in the background. The first run downloads its weights from Hugging Face, about 4 GB; after that it loads in about 15 seconds and uses about 5 GB. `GET /jobs/current` shows the load while it runs, and a failed load is printed in the terminal. Without the `speech` or `voice-design` extra the app still runs, but anything that needs that model says how to install it. To start without loading any model, for working on the page, set `VOICEWRIGHT_NO_MODELS=1`. Running it again while it's up just opens the page, unless `--config` names a config file other than the default one. Use `--port` to pick another port.
+The last step starts the app at <http://127.0.0.1:8765/> and opens it in its own window, then loads the speech model (Chatterbox) in the background. The first run downloads its weights from Hugging Face, about 4 GB; after that it loads in about 15 seconds and uses about 5 GB. `GET /jobs/current` shows the load while it runs, and a failed load is printed in the terminal. Without the `speech` or `voice-design` extra the app still runs, but anything that needs that model says how to install it. To start without loading any model, for working on the page, set `VOICEWRIGHT_NO_MODELS=1`. Running it again while it's up just opens the page, unless `--config` names a config file other than the default one. Use `--port` to pick another port.
+
+The window is an app window from Google Chrome, Microsoft Edge, Brave, or Chromium (the first of these that's installed): no tabs and no address bar. Without one of those, or with `--tab`, or when the `BROWSER` environment variable is set, the page opens in your usual browser instead. In Chrome or Edge you can also install it from the address bar's install button, to get a Dock icon.
 
 ### Convert a file
 

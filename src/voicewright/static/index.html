@@ -4,192 +4,269 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Voicewright</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
-    section { border: 1px solid #ccc; border-radius: 6px; padding: 1rem; margin-top: 1.5rem; }
-    h2 { margin-top: 0; }
-    h3 { margin: 1rem 0 0.5rem; }
-    .error, #convert-error { color: #b00020; }
-    [hidden] { display: none !important; }
-    audio { display: block; margin: 0.5rem 0; width: 100%; }
-    textarea, input[type=text] { width: 100%; box-sizing: border-box; font: inherit; }
-    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.4rem 0; }
-    .card { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; margin: 0.75rem 0; }
-    .preset { border-top: 1px solid #eee; padding-top: 0.5rem; margin-top: 0.5rem; }
-    .muted { color: #666; font-size: 0.9em; }
-    .pending { background: #fff8e1; border-radius: 4px; padding: 0.5rem; margin: 0.4rem 0; }
-    #job { position: sticky; top: 0; background: #e8f0fe; border-radius: 6px; padding: 0.5rem 0.75rem; }
-    label.slider { display: flex; gap: 0.4rem; align-items: center; }
-    label.slider output { min-width: 2.5rem; }
-    input[type=search] { flex: 1; font: inherit; }
-    .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-    .license-note { font-size: 0.85em; color: #555; }
-    .ok { color: #1b5e20; }
-    ul.problems, ul.warnings { margin: 0.4rem 0; padding-left: 1.2rem; }
-    ul.problems li, ul.warnings li { margin: 0.3rem 0; }
-    ul.warnings { color: #6d4c00; }
-    button.link { background: none; border: none; padding: 0; color: #0b57d0; text-decoration: underline; cursor: pointer; font: inherit; }
-  </style>
+  <meta name="description" content="Design voices, gather sounds, and turn tagged Scripts into finished audio, all on your Mac.">
+  <meta name="theme-color" content="#0e0b1c">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // The theme the user picked last (light or dark); without one, the system's.
+    try {
+      const theme = localStorage.getItem("voicewright.theme");
+      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    } catch {}
+  </script>
 </head>
 <body>
-  <h1>Voicewright</h1>
-  <p>Design a Voice, gather sounds, then write a Script and hear it.</p>
-
-  <div id="job" role="status" aria-live="polite" hidden>
-    <span id="job-message"></span> <progress id="job-progress" max="1"></progress>
-  </div>
-  <p id="voices-error" class="error" role="alert" hidden></p>
-
-  <section aria-labelledby="voices-heading">
-    <h2 id="voices-heading">Voices</h2>
-
-    <h3>Design a voice</h3>
-    <form id="design-form">
-      <label for="design-description">Describe the voice</label>
-      <textarea id="design-description" rows="2" maxlength="500" required
-        placeholder="A gravelly older man with a slow, calm, warm voice."></textarea>
-      <div class="row"><button type="submit">Design</button></div>
-    </form>
-    <p class="error" role="alert" hidden data-error-for="design"></p>
-
-    <div id="drafts-area" hidden>
-      <h3>Draft voices</h3>
-      <p class="muted">Not yet saved. Resume one to review it, or discard it.</p>
-      <div id="drafts"></div>
-      <p class="error" role="alert" hidden data-error-for="drafts"></p>
-    </div>
-
-    <div id="review" class="card" hidden></div>
-
-    <h3>Saved Voices</h3>
-    <p id="no-voices" class="muted">No saved Voices yet.</p>
-    <div id="voices"></div>
-  </section>
-
-  <section aria-labelledby="sounds-heading">
-    <h2 id="sounds-heading">Sounds</h2>
-    <p class="muted">A Sound effect in a Script, like <code>{explosion}</code>, plays the sound
-      saved under that name.</p>
-
-    <h3>Your Sound library</h3>
-    <p id="no-sounds" class="muted">No sounds yet. Find one on Freesound below.</p>
-    <div id="sounds"></div>
-
-    <h3 id="sound-search-heading">Find a sound on Freesound</h3>
-    <div id="sound-replacing" class="pending" hidden></div>
-    <form id="sound-search-form" class="row">
-      <label for="sound-query" class="visually-hidden">Search Freesound</label>
-      <input type="search" id="sound-query" maxlength="200" required placeholder="thunder">
-      <button type="submit">Search</button>
-    </form>
-    <p id="sound-search-error" class="error" role="alert" hidden></p>
-    <p id="sound-search-status" class="muted" role="status"></p>
-    <div id="sound-results"></div>
-    <div class="row"><button type="button" id="sound-more" hidden>More results</button></div>
-  </section>
-
-  <section aria-labelledby="scripts-heading">
-    <h2 id="scripts-heading">Scripts</h2>
-    <p class="muted">Write what the Voice says. <code>[angry]</code> changes the emotion until the
-      next tag; text before any tag is neutral. <code>{explosion}</code> plays that sound from your
-      Sound library. <code>(laugh)</code> is a Vocal effect: allowed, but skipped for now.</p>
-
-    <form id="script-form">
-      <label for="script-voice">Voice</label>
-      <div class="row">
-        <select id="script-voice"></select>
-        <span id="script-no-voices" class="muted" hidden>No saved Voices yet. Design one above.</span>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="/static/icon.svg" alt="">
+      <div>
+        <span class="brand-name">Voicewright</span>
+        <span class="brand-tag">Voice studio</span>
       </div>
-      <label for="script-text">Script</label>
-      <textarea id="script-text" rows="8" maxlength="20000" spellcheck="true"
-        placeholder="The storm rolled in after dark. [angry] Get inside, now! {thunder} [sad] It was too late."></textarea>
-      <div class="row">
-        <button type="button" id="script-check">Check</button>
-        <button type="submit" id="script-generate" data-starts-job>Generate</button>
+    </div>
+
+    <nav class="nav" aria-label="Areas">
+      <a class="nav-item" href="#voices" data-area="voices">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>
+        </span>
+        <span class="nav-label">Voices<small>Design and tune</small></span>
+        <span class="badge" id="badge-voices"></span>
+      </a>
+      <a class="nav-item" href="#sounds" data-area="sounds">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2M7 7v10M11 4v16M15 8v8M19 10v4M21 12h0"/></svg>
+        </span>
+        <span class="nav-label">Sounds<small>Effects library</small></span>
+        <span class="badge" id="badge-sounds"></span>
+      </a>
+      <a class="nav-item" href="#scripts" data-area="scripts">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+        </span>
+        <span class="nav-label">Scripts<small>Write and render</small></span>
+        <span class="badge" id="badge-scripts"></span>
+      </a>
+      <a class="nav-item" href="#convert" data-area="convert">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg>
+        </span>
+        <span class="nav-label">Convert<small>Any audio to WAV</small></span>
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button type="button" id="theme-toggle" class="icon-button ghost" aria-label="Switch between light and dark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <span class="local-note">Runs on your Mac. Generation works offline.</span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="area-title">Voices</h1>
+        <p class="area-blurb" id="area-blurb">Design a Voice, gather sounds, then write a Script and hear it.</p>
       </div>
-    </form>
-    <p id="script-error" class="error" role="alert" hidden></p>
-    <div id="script-result" role="status" aria-live="polite"></div>
+      <div id="job" role="status" aria-live="polite" hidden>
+        <span class="eq" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span id="job-message"></span>
+        <progress id="job-progress" max="1"></progress>
+      </div>
+    </header>
 
-    <h3>Recent Outputs</h3>
-    <div class="row">
-      <label for="cache-size">Keep the last</label>
-      <select id="cache-size"></select>
-      <span class="muted">until Voicewright restarts. Save the ones you want to keep.</span>
+    <!-- Voices ------------------------------------------------------------------------------>
+    <section class="area" id="area-voices" data-area="voices"
+      data-blurb="Describe a voice, review every emotion, and keep the ones you like."
+      aria-labelledby="voices-heading">
+      <h2 id="voices-heading" class="visually-hidden">Voices</h2>
+      <p id="voices-error" class="error" role="alert" hidden></p>
+
+      <div class="panel hero">
+        <div class="panel-head">
+          <h3>Design a voice</h3>
+          <p class="muted">Plain words are enough. Every emotion in the default set is designed from it.</p>
+        </div>
+        <form id="design-form">
+          <label for="design-description" class="visually-hidden">Describe the voice</label>
+          <textarea id="design-description" rows="3" maxlength="500" required
+            placeholder="A gravelly older man with a slow, calm, warm voice."></textarea>
+          <div class="row end"><button type="submit">Design</button></div>
+        </form>
+        <p class="error" role="alert" hidden data-error-for="design"></p>
+      </div>
+
+      <div id="drafts-area" class="panel" hidden>
+        <div class="panel-head">
+          <h3>Draft voices</h3>
+          <p class="muted">Not yet saved. Resume one to review it, or discard it.</p>
+        </div>
+        <div id="drafts"></div>
+        <p class="error" role="alert" hidden data-error-for="drafts"></p>
+      </div>
+
+      <div id="review" class="panel" hidden></div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Saved Voices</h3>
+          <p class="muted">Open one to hear, retune, or add emotions.</p>
+        </div>
+        <p id="no-voices" class="empty">No saved Voices yet. Design one above.</p>
+        <div id="voices"></div>
+      </div>
+    </section>
+
+    <!-- Sounds ------------------------------------------------------------------------------>
+    <section class="area" id="area-sounds" data-area="sounds" hidden
+      data-blurb="A Sound effect in a Script, like {explosion}, plays the sound saved under that name."
+      aria-labelledby="sounds-heading">
+      <h2 id="sounds-heading" class="visually-hidden">Sounds</h2>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Your Sound library</h3>
+          <p class="muted">Each sound keeps its credit and license.</p>
+        </div>
+        <p id="no-sounds" class="empty">No sounds yet. Find one on Freesound below.</p>
+        <div id="sounds" class="grid"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3 id="sound-search-heading">Find a sound on Freesound</h3>
+          <p class="muted">Preview it, check the license, name it, and add it.</p>
+        </div>
+        <div id="sound-replacing" class="pending" hidden></div>
+        <form id="sound-search-form" class="row search-bar">
+          <label for="sound-query" class="visually-hidden">Search Freesound</label>
+          <input type="search" id="sound-query" maxlength="200" required placeholder="thunder, door slam, crowd cheering…">
+          <button type="submit">Search</button>
+        </form>
+        <p id="sound-search-error" class="error" role="alert" hidden></p>
+        <p id="sound-search-status" class="muted" role="status"></p>
+        <div id="sound-results" class="grid"></div>
+        <div class="row"><button type="button" id="sound-more" hidden>More results</button></div>
+      </div>
+    </section>
+
+    <!-- Scripts ----------------------------------------------------------------------------->
+    <section class="area" id="area-scripts" data-area="scripts" hidden
+      data-blurb="Write what the Voice says, check it, and render it into one finished WAV."
+      aria-labelledby="scripts-heading">
+      <h2 id="scripts-heading" class="visually-hidden">Scripts</h2>
+
+      <div class="panel hero">
+        <form id="script-form">
+          <div class="row">
+            <label for="script-voice">Voice</label>
+            <select id="script-voice"></select>
+            <span id="script-no-voices" class="muted" hidden>No saved Voices yet. Design one in Voices.</span>
+          </div>
+          <div class="legend">
+            <span><code class="tok-emotion">[angry]</code>changes the emotion until the next tag</span>
+            <span><code class="tok-sound">{thunder}</code>plays a sound from your library</span>
+            <span><code class="tok-effect">(laugh)</code>a Vocal effect: allowed, skipped for now</span>
+          </div>
+          <label for="script-text" class="visually-hidden">Script</label>
+          <div class="editor">
+            <pre class="editor-highlight" id="script-highlight" aria-hidden="true"></pre>
+            <textarea id="script-text" rows="8" maxlength="20000" spellcheck="true"
+              placeholder="The storm rolled in after dark. [angry] Get inside, now! {thunder} [sad] It was too late."></textarea>
+          </div>
+          <div class="editor-foot">
+            <span>Text before any tag is neutral. <kbd>⌘</kbd> <kbd>Enter</kbd> generates.</span>
+            <span id="script-count"></span>
+          </div>
+          <div class="palette" id="script-palette"></div>
+          <div class="row end">
+            <button type="button" id="script-check">Check</button>
+            <button type="submit" id="script-generate" data-starts-job>Generate</button>
+          </div>
+        </form>
+        <p id="script-error" class="error" role="alert" hidden></p>
+        <div id="script-result" role="status" aria-live="polite"></div>
+      </div>
+
+      <div class="columns">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Recent Outputs</h3>
+          </div>
+          <div class="row">
+            <label for="cache-size">Keep the last</label>
+            <select id="cache-size"></select>
+            <span class="muted">until Voicewright restarts. Save the ones you want to keep.</span>
+          </div>
+          <p id="cache-error" class="error" role="alert" hidden></p>
+          <p id="no-outputs" class="empty">No Outputs yet. Generate a Script to hear it here.</p>
+          <div id="outputs" class="grid"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Saved outputs</h3>
+          </div>
+          <p id="no-saved" class="empty">Nothing saved yet. Saved outputs are kept, each with a record
+            of its Script, Voice, and sound credits.</p>
+          <div id="saved" class="grid"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Convert ----------------------------------------------------------------------------->
+    <section class="area" id="area-convert" data-area="convert" hidden
+      data-blurb="Turn an audio or video file into a standard WAV: 16-bit, mono."
+      aria-labelledby="convert-heading">
+      <h2 id="convert-heading" class="visually-hidden">Convert</h2>
+
+      <div class="panel">
+        <form id="convert-form">
+          <label class="dropzone" id="convert-drop">
+            <span class="dropzone-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+            </span>
+            <strong>Drop a file here, or choose one</strong>
+            <span class="formats">
+              <span class="chip">MP3</span><span class="chip">M4A</span><span class="chip">FLAC</span>
+              <span class="chip">OGG</span><span class="chip">AAC</span><span class="chip">WAV</span>
+              <span class="chip">Video with sound</span>
+            </span>
+            <input type="file" name="file" id="convert-file" accept="audio/*,video/*" required>
+          </label>
+          <div class="row end"><button type="submit" id="convert-button">Convert</button></div>
+        </form>
+        <p id="convert-status" class="muted" role="status"></p>
+        <p id="convert-error" role="alert" hidden></p>
+        <div id="convert-result" class="card" hidden>
+          <audio id="convert-player" controls></audio>
+          <a id="convert-download" class="button download" href="#">Download WAV</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="confirm-dialog" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-message"></p>
+    <div class="row end">
+      <button value="cancel" class="ghost" autofocus>Cancel</button>
+      <button value="ok" id="confirm-ok" class="danger solid">OK</button>
     </div>
-    <p id="cache-error" class="error" role="alert" hidden></p>
-    <p id="no-outputs" class="muted">No Outputs yet.</p>
-    <div id="outputs"></div>
+  </form>
+</dialog>
 
-    <h3>Saved outputs</h3>
-    <p id="no-saved" class="muted">Nothing saved yet. Saved outputs are kept, each with a record
-      of its Script, Voice, and sound credits.</p>
-    <div id="saved"></div>
-  </section>
-
-  <section aria-labelledby="convert-heading">
-    <h2 id="convert-heading">Convert</h2>
-    <p>Turn an audio or video file (MP3, M4A, FLAC, OGG, AAC, WAV, or a video with sound)
-      into a standard WAV: 16-bit, mono.</p>
-    <form id="convert-form">
-      <input type="file" name="file" id="convert-file" accept="audio/*,video/*" required>
-      <button type="submit" id="convert-button">Convert</button>
-    </form>
-    <p id="convert-status" role="status"></p>
-    <p id="convert-error" role="alert" hidden></p>
-    <div id="convert-result" hidden>
-      <audio id="convert-player" controls></audio>
-      <a id="convert-download" href="#">Download WAV</a>
-    </div>
-  </section>
-
-  <script src="/static/common.js"></script>
-  <script src="/static/voices.js"></script>
-  <script src="/static/sounds.js"></script>
-  <script src="/static/scripts.js"></script>
-  <script>
-    const form = document.getElementById("convert-form");
-    const button = document.getElementById("convert-button");
-    const status = document.getElementById("convert-status");
-    const error = document.getElementById("convert-error");
-    const result = document.getElementById("convert-result");
-    const player = document.getElementById("convert-player");
-    const download = document.getElementById("convert-download");
-    let lastUrl = null;
-
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const file = document.getElementById("convert-file").files[0];
-      if (!file) return;
-      button.disabled = true;
-      error.hidden = true;
-      result.hidden = true;
-      status.textContent = `Converting ${file.name}…`;
-      try {
-        const body = new FormData();
-        body.append("file", file);
-        const response = await fetch("/convert", { method: "POST", body });
-        if (!response.ok) {
-          const problem = await response.json().catch(() => null);
-          throw new Error(problem?.detail ?? `Conversion failed (HTTP ${response.status})`);
-        }
-        if (lastUrl) URL.revokeObjectURL(lastUrl);
-        lastUrl = URL.createObjectURL(await response.blob());
-        player.src = lastUrl;
-        download.href = lastUrl;
-        download.download = file.name.replace(/\.[^.]*$/, "") + ".wav";
-        status.textContent = `Converted ${file.name}.`;
-        result.hidden = false;
-      } catch (problem) {
-        status.textContent = "";
-        error.textContent = problem.message === "Failed to fetch"
-          ? "Can't reach Voicewright; is it still running?"
-          : problem.message;
-        error.hidden = false;
-      } finally {
-        button.disabled = false;
-      }
-    });
-  </script>
+<script src="/static/common.js"></script>
+<script src="/static/voices.js"></script>
+<script src="/static/sounds.js"></script>
+<script src="/static/scripts.js"></script>
+<script src="/static/convert.js"></script>
 </body>
 </html>
