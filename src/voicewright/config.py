@@ -2,12 +2,14 @@
 
 import json
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-# Written into a new config file. The Output cache (step 4.3) reads its setting once it exists.
+# How many recent Outputs the Output cache keeps (spec story 50).
 DEFAULT_OUTPUT_CACHE_SIZE = 5
+OUTPUT_CACHE_RANGE = (5, 10)
 DEFAULT_FREESOUND_API_KEY = ""
 # The Freesound API key can also come from the environment, which wins over the config file.
 FREESOUND_KEY_ENV = "FREESOUND_API_KEY"
@@ -23,6 +25,7 @@ class ConfigError(Exception):
 class Config:
     data_folder: Path
     freesound_api_key: str = ""
+    output_cache_size: int = DEFAULT_OUTPUT_CACHE_SIZE
 
 
 def expand_home(text: str) -> Path:
@@ -82,7 +85,38 @@ def load_config(path: Path) -> Config:
         raise ConfigError(
             f'{path} needs freesound_api_key in quotes, e.g. freesound_api_key = "abc123"'
         )
-    return Config(data_folder=folder, freesound_api_key=key.strip())
+    size = values.get("output_cache_size", DEFAULT_OUTPUT_CACHE_SIZE)
+    low, high = OUTPUT_CACHE_RANGE
+    # bool is an int in Python; output_cache_size = true is a mistake, not 1.
+    if isinstance(size, bool) or not isinstance(size, int) or not low <= size <= high:
+        raise ConfigError(
+            f"{path} needs output_cache_size to be a whole number from {low} to {high}, "
+            f"e.g. output_cache_size = {DEFAULT_OUTPUT_CACHE_SIZE}"
+        )
+    return Config(data_folder=folder, freesound_api_key=key.strip(), output_cache_size=size)
+
+
+_CACHE_SIZE_LINE = re.compile(
+    r"^([ \t]*output_cache_size[ \t]*=[ \t]*)[^\n#]*?([ \t]*(#.*)?)$", re.M
+)
+
+
+def save_output_cache_size(path: Path, size: int) -> None:
+    """Change output_cache_size in the config file, leaving everything else as written.
+
+    Raises OSError if the file can't be written.
+    """
+    # Through any link to the real file, so a linked config stays a link.
+    real = Path(os.path.realpath(path))
+    text = real.read_text(encoding="utf-8-sig")
+    if _CACHE_SIZE_LINE.search(text):
+        text = _CACHE_SIZE_LINE.sub(lambda m: f"{m.group(1)}{size}{m.group(2)}", text, count=1)
+    else:
+        text = text.rstrip("\n") + f"\noutput_cache_size = {size}\n"
+    # Written whole and swapped in, owner-only (mkstemp's mode): the file holds the API key.
+    from voicewright.drafts import atomic_write
+
+    atomic_write(real, text.encode("utf-8"))
 
 
 def freesound_api_key(path: Path) -> str:

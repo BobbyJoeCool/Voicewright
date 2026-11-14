@@ -125,6 +125,15 @@ Example: `[angry] I hate you! (scream) {explosion}` becomes:
 
 Untagged text uses the neutral preset.
 
+Parsing rules (step 4.1):
+
+- Names inside markers are matched ignoring case: `[Angry]` is `[angry]`, `{Door-Slam}` is `{door-slam}`.
+- An Emotion tag or Vocal effect is one word: lowercase letters, digits, `-` and `_`, starting with a letter. A Sound effect follows the sound-name rule in section 6.
+- A marker closes on its own line, before any other bracket. Otherwise it's a parse error at the opening bracket. So are a closing bracket with no opener, an empty marker, and a marker holding something that can't be a name (`(and then)`). Each error gives its character position and its line and column, and parsing carries on so every error is reported at once.
+- Whitespace inside speech is collapsed to single spaces; speech that is only whitespace is dropped.
+- A Script with nothing to say or play (empty, or only Vocal effects and tags) is rejected with a parse error.
+- An Emotion tag is checked against the Voice even if no speech follows it.
+
 Before any generation starts, the script is validated:
 
 - Every emotion tag must match an emotion preset on the chosen Voice.
@@ -167,6 +176,10 @@ Tuning guidance from the `chatterbox-mlx` README:
 
 Sound effects play in sequence with speech in v1.
 
+Starting values (step 4.2, to tune by ear): 350 ms of silence between pieces, a 10 ms fade at each end of every piece against clicks, every piece brought to -20 dBFS RMS without its peak passing -1 dBFS, and everything resampled to the highest sample rate among the pieces (Chatterbox speaks at 24 kHz, Freesound previews are often 44.1 kHz).
+
+What a Script uses (each emotion's Reference clip and values, each sound and its credit) is copied when generation starts, so editing the Voice or the Sound library during the job doesn't change that Output.
+
 ## 8. Output storage
 
 Generated audio is presented but not kept by default.
@@ -175,6 +188,10 @@ Generated audio is presented but not kept by default.
 2. The cache keeps the last N outputs (setting: 5 to 10). When it's full, the oldest is deleted.
 3. A **Save** action copies an output into a separate **saved folder** that cleanup never touches, with a sidecar record of the script text, the Voice, the preset values used, and credits and licenses for every sound effect used.
 4. The output cache is cleared on app startup. The draft area is not.
+
+A Saved output is two files side by side in `saved/`, named by its id: when it was saved, the Voice, and a short random part (`2026-11-07-143022-old-narrator-1a2b3c.wav` and `.json`). The sidecar holds the Script, the Voice (name, id, description), the exaggeration and cfg of each emotion the Script used, the credit of each sound used (name, title, author, license, source URL, attribution), the warnings, and the length. The record is built when generation starts, so the credits are those of the sounds actually used, even if one is replaced before saving.
+
+The cache size is `output_cache_size` in the config file (default 5). The page changes it through `PUT /settings`, which rewrites only that line of the file, keeping comments and the API key. A value outside 5 to 10 in the file stops startup with a message saying how to fix it, as other bad settings do.
 
 ## Backend endpoints (draft)
 
@@ -193,8 +210,14 @@ Generated audio is presented but not kept by default.
 | `PUT /sounds/{name}` | Replace the sound behind a name with another Freesound result |
 | `DELETE /sounds/{name}` | Remove a sound |
 | `GET /sounds/{name}/audio` | Play a sound |
-| `POST /generate` | Validate a tagged script against a voice, then return the output |
-| `POST /outputs/{id}/save` | Copy a cached output and its sidecar to the saved folder |
+| `POST /scripts/check` | Check a Script against a Voice: 200 with `warnings`, or 422 listing `missing_emotions`, `missing_sounds`, and `parse_errors` |
+| `POST /scripts/generate` | Check the Script (422, no job, if rejected), then start a job that renders it into one Output; progress counts Segments |
+| `GET /outputs` | List the Output cache, newest first, each with its record |
+| `GET /outputs/{id}`, `GET /outputs/{id}/audio` | One Output, and its audio |
+| `GET /settings`, `PUT /settings` | Read or change the Output cache size (5 to 10); a change is written to the config file, and a smaller size removes the oldest Outputs at once |
+| `POST /outputs/{id}/save` | Copy a cached Output to the saved folder with its sidecar record (201; saving it again gives back the first copy, 200) |
+| `GET /saved`, `GET /saved/{id}` | List Saved outputs, newest first, or get one, with its record |
+| `GET /saved/{id}/audio`, `GET /saved/{id}/record` | A Saved output's WAV, and its sidecar JSON |
 
 ## Open questions and tests
 

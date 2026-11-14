@@ -67,6 +67,8 @@
     const sounds = await api("GET", "/sounds");
     $("sounds").replaceChildren(...sounds.map(librarySound));
     $("no-sounds").hidden = sounds.length > 0;
+    // The Scripts area rechecks a Script that was missing a sound.
+    document.dispatchEvent(new CustomEvent("voicewright:sounds", { detail: sounds }));
     return sounds;
   }
 
