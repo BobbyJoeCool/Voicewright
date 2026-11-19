@@ -14,6 +14,14 @@ The storm had been building all afternoon. {thunder}
 
 Thunder: ["Huge Thunder Crack [XY + MS]"](https://freesound.org/people/-CASK-/sounds/732992/) by -CASK-, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+## Status
+
+| | |
+|---|---|
+| **Implemented** | Voice design from a text description (Qwen3-TTS VoiceDesign), speech and voice cloning (Chatterbox on MLX), take-by-take review with regenerate/retune/roll back, a Freesound-backed sound library with credits and licenses, a tagged Script editor with a whole-script check, rendering to one WAV, and saved Outputs. |
+| **Tested** | 400 unit tests (`.venv/bin/pytest`); 66 browser end-to-end tests that drive every area of the page on fake models (`.venv/bin/pytest tests/e2e`, Playwright); an offline smoke test with the real models (`pytest -m smoke`); and a v1 QA pass ([`docs/qa-v1.md`](docs/qa-v1.md)) that checked all 61 user stories against the running app, mostly with a script driving headless Chrome and the rest (window launch, install, keyboard, drag and drop) by hand. The checks cover lengths, formats and playback, not how the audio sounds. |
+| **Planned** | Nothing scheduled after v1.0.0; changes are recorded in [`CHANGELOG.md`](CHANGELOG.md). |
+
 ## What it does
 
 - **Voices:** describe a voice in plain words. Qwen3-TTS designs a neutral Reference clip plus one Emotion preset each for angry, sad, and excited. Review each clip: regenerate it, tune its exaggeration and cfg, or go back to an earlier take. Then keep the Voice under a name.
