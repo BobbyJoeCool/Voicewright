@@ -1,8 +1,9 @@
 import json
 import os
+from pathlib import Path
 
 import pytest
-from fakes import FakeEngines
+from fakes import FakeEngines, FakeFreesound
 from fastapi.testclient import TestClient
 
 from voicewright.app import create_app
@@ -11,6 +12,21 @@ from voicewright.engines import NO_MODELS
 # No test loads a real model, even with the speech extra installed: this reaches every app the
 # tests start, in-process or as the installed `voicewright` command. The smoke tests opt back in.
 os.environ[NO_MODELS] = "1"
+
+E2E_FOLDER = Path(__file__).parent / "e2e"
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Leave the browser E2E tests out of a plain `pytest`: they need Playwright's browsers and
+    take longer. Naming them (`pytest tests/e2e`, or a file in it) runs them."""
+    if collection_path != E2E_FOLDER:
+        return None
+    asked = any(
+        E2E_FOLDER == Path(arg.split("::")[0]).resolve()
+        or E2E_FOLDER in Path(arg.split("::")[0]).resolve().parents
+        for arg in config.args
+    )
+    return None if asked else True
 
 
 @pytest.fixture(autouse=True)
@@ -46,12 +62,14 @@ def write_config(config_path, data_folder):
     return write
 
 
-def run_app(config_path, fakes: FakeEngines | None = None):
+def run_app(config_path, fakes: FakeEngines | None = None, freesound=None):
     """The FastAPI app built from this config, run in-process (no server, no port).
 
-    Always on fake engines: no test loads a real model.
+    Always on fake engines: no test loads a real model. Freesound is the fake too unless a test
+    passes a real client (pointed at a local stand-in server, never the internet).
     """
-    return TestClient(create_app(config_path, (fakes or FakeEngines()).engines()))
+    engines = (fakes or FakeEngines()).engines()
+    return TestClient(create_app(config_path, engines, freesound=freesound or FakeFreesound()))
 
 
 @pytest.fixture
@@ -61,9 +79,15 @@ def fakes():
 
 
 @pytest.fixture
-def client(write_config, fakes):
+def freesound():
+    """The fake Freesound the `client` app uses: canned results, and how to make it fail."""
+    return FakeFreesound()
+
+
+@pytest.fixture
+def client(write_config, fakes, freesound):
     """The app running in-process against a fresh temp data folder, on fake engines."""
-    with run_app(write_config(), fakes) as client:
+    with run_app(write_config(), fakes, freesound) as client:
         yield client
 
 

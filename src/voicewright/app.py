@@ -2,17 +2,25 @@ import os
 import re
 import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
 from voicewright.audio_converter import SUPPORTED, FfmpegMissing, UnsupportedAudio, convert
-from voicewright.config import ConfigError, load_config
+from voicewright.config import (
+    FREESOUND_KEY_ENV,
+    OUTPUT_CACHE_RANGE,
+    ConfigError,
+    freesound_api_key,
+    load_config,
+    save_output_cache_size,
+)
 from voicewright.data_folder import DataFolder, MissingLinkTarget
 from voicewright.default_emotions import (
     CFG_RANGE,
@@ -23,8 +31,27 @@ from voicewright.default_emotions import (
 from voicewright.default_emotions import NAME as EMOTION_NAME
 from voicewright.drafts import Draft, DraftProblem, DraftStore
 from voicewright.engines import Engines, default_engines
+from voicewright.freesound import (
+    Freesound,
+    FreesoundClient,
+    FreesoundSound,
+    FreesoundSoundMissing,
+    FreesoundUnavailable,
+)
+from voicewright.generator import ScriptChanged, generate_output, prepare
 from voicewright.jobs import Job, JobAlreadyRunning, JobRunner, JobState
 from voicewright.model_manager import ModelManager
+from voicewright.output_store import Output, OutputCache, SavedOutput, SavedOutputs, slug
+from voicewright.script import Problem, ScriptCheck, Segment
+from voicewright.script import check as check_script
+from voicewright.sound_library import (
+    Credit,
+    Sound,
+    SoundExists,
+    SoundLibrary,
+    SoundMissing,
+    sound_name,
+)
 from voicewright.voice_design import (
     design_draft_voice,
     redesign_draft_voice,
@@ -43,6 +70,8 @@ from voicewright.voice_library import (
 
 # Long enough for a detailed description; Qwen is told the whole thing for every clip.
 MAX_DESCRIPTION = 500
+# About 3,000 words: a long chapter, which takes the speech model well over ten minutes.
+MAX_SCRIPT = 20_000
 
 STATIC_FOLDER = Path(__file__).parent / "static"
 HOME_PAGE = STATIC_FOLDER / "index.html"
@@ -235,6 +264,203 @@ class ChooseTake(BaseModel):
     take: str
 
 
+class CreditOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str
+    author: str
+    license: str
+    source: str
+    attribution: str
+    freesound_id: int | None = None
+
+
+class SoundOut(BaseModel):
+    name: str
+    added: str
+    duration: float
+    credit: CreditOut
+    audio_url: str
+
+    @classmethod
+    def of(cls, sound: Sound) -> "SoundOut":
+        return cls(
+            name=sound.name,
+            added=sound.added,
+            duration=sound.duration,
+            credit=CreditOut.model_validate(sound.credit),
+            audio_url=f"/sounds/{sound.name}/audio",
+        )
+
+
+class FreesoundSoundOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    author: str
+    license: str
+    url: str
+    duration: float
+    preview_url: str
+
+
+class SearchOut(BaseModel):
+    results: list[FreesoundSoundOut]
+    count: int
+    page: int
+    has_next: bool
+
+
+class AddSoundRequest(BaseModel):
+    freesound_id: int = Field(gt=0)
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def a_sound_name(cls, name: str) -> str:
+        return sound_name(name)
+
+
+class ReplaceSoundRequest(BaseModel):
+    freesound_id: int = Field(gt=0)
+
+
+class ScriptRequest(BaseModel):
+    voice_id: str
+    script: str = Field(max_length=MAX_SCRIPT)
+
+
+class SegmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str  # "speech", "vocal_effect", or "sound_effect"
+    position: int
+    text: str | None = None
+    emotion: str | None = None
+    name: str | None = None
+
+
+class ProblemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    position: int
+    line: int
+    column: int
+    message: str
+
+
+class ScriptCheckOut(BaseModel):
+    """A Script check. The same shape whether it's ready (200) or rejected (422, with
+    `detail`), so the page reads both the same way."""
+
+    ready: bool
+    segments: list[SegmentOut]
+    missing_emotions: list[str]
+    missing_sounds: list[str]
+    parse_errors: list[ProblemOut]
+    warnings: list[ProblemOut]
+    detail: str | None = None
+
+    @classmethod
+    def of(cls, result: ScriptCheck) -> "ScriptCheckOut":
+        def out(items: list[Segment] | list[Problem], model):
+            return [model.model_validate(item) for item in items]
+
+        return cls(
+            ready=result.ready,
+            segments=out(result.segments, SegmentOut),
+            missing_emotions=result.missing_emotions,
+            missing_sounds=result.missing_sounds,
+            parse_errors=out(result.parse_errors, ProblemOut),
+            warnings=out(result.warnings, ProblemOut),
+            detail=None if result.ready else result.summary(),
+        )
+
+
+class OutputOut(BaseModel):
+    """An Output in the cache, with what made it."""
+
+    id: str
+    created: str
+    duration: float
+    voice_name: str
+    script: str
+    presets: dict[str, dict[str, float]]
+    sounds: list[dict]
+    warnings: list[str]
+    audio_url: str
+    # A file name for downloading it, e.g. old-narrator-2026-11-07-143022.wav
+    download_name: str
+    # The Saved output it was saved as, if it has been.
+    saved_id: str | None = None
+
+    @classmethod
+    def of(cls, output: Output, saved_id: str | None = None) -> "OutputOut":
+        record = output.record
+        return cls(
+            id=output.id,
+            created=output.created,
+            duration=output.duration,
+            voice_name=record["voice"]["name"],
+            script=record["script"],
+            presets=record["presets"],
+            sounds=record["sounds"],
+            warnings=record["warnings"],
+            audio_url=f"/outputs/{output.id}/audio",
+            download_name=download_name(record["voice"]["name"], output.created),
+            saved_id=saved_id,
+        )
+
+
+def download_name(voice_name: str, created: str) -> str:
+    """e.g. old-narrator-20261107-143022.wav, in local time like a Saved output's name."""
+    when = datetime.fromisoformat(created).astimezone()
+    return f"{slug(voice_name)}-{when:%Y%m%d-%H%M%S}.wav"
+
+
+class SavedOutputOut(BaseModel):
+    """A Saved output and its sidecar record."""
+
+    id: str
+    saved: str
+    duration: float
+    voice_name: str
+    script: str
+    presets: dict[str, dict[str, float]]
+    sounds: list[dict]
+    warnings: list[str]
+    audio_url: str
+    record_url: str
+    download_name: str
+
+    @classmethod
+    def of(cls, saved: SavedOutput) -> "SavedOutputOut":
+        record = saved.record
+        return cls(
+            id=saved.id,
+            saved=saved.saved,
+            duration=float(record.get("duration", 0)),
+            voice_name=record.get("voice", {}).get("name", ""),
+            script=record.get("script", ""),
+            presets=record.get("presets", {}),
+            sounds=record.get("sounds", []),
+            warnings=record.get("warnings", []),
+            audio_url=f"/saved/{saved.id}/audio",
+            record_url=f"/saved/{saved.id}/record",
+            download_name=saved.audio_file,
+        )
+
+
+class SettingsOut(BaseModel):
+    output_cache_size: int
+    output_cache_range: tuple[int, int] = OUTPUT_CACHE_RANGE
+
+
+class SettingsRequest(BaseModel):
+    output_cache_size: int = Field(ge=OUTPUT_CACHE_RANGE[0], le=OUTPUT_CACHE_RANGE[1], strict=True)
+
+
 class ProgressOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -256,12 +482,22 @@ class JobOut(BaseModel):
     error: str | None = None
 
 
+class ScriptRejected(Exception):
+    """A Script failed its check; the app answers 422 with the whole check."""
+
+    def __init__(self, result: ScriptCheck):
+        super().__init__(result.summary())
+        self.result = result
+
+
 def create_app(
     config_path: Path,
     engines: Engines | None = None,
     default_emotions_file: Path = DEFAULT_EMOTIONS_FILE,
+    freesound: Freesound | None = None,
 ) -> FastAPI:
-    """The app, on the given engines (the real ones unless a test passes fakes).
+    """The app, on the given engines and Freesound client (the real ones unless a test passes
+    fakes).
 
     Raises ConfigError, or DefaultEmotionsError for a broken Default emotion set file.
     """
@@ -283,11 +519,29 @@ def create_app(
 
     app = FastAPI(title="Voicewright")
     jobs = JobRunner()
-    models = ModelManager(engines or default_engines())
+    engines = engines or default_engines()
+    models = ModelManager(engines)
+    vocal_effects = engines.vocal_effects
     drafts = DraftStore(folder / "drafts")
     library = VoiceLibrary(folder / "voices", drafts)
+    sounds = SoundLibrary(folder / "sounds")
+    outputs = OutputCache(folder / "cache", config.output_cache_size)
+    # Temporary Outputs don't outlive the app (story 54); Draft voices do.
+    outputs.clear()
+    saved_outputs = SavedOutputs(folder / "saved")
+    if freesound is None:
+        freesound = FreesoundClient(
+            lambda: freesound_api_key(config_path),
+            key_hint=f"{config_path} as freesound_api_key (or the {FREESOUND_KEY_ENV} "
+            "environment variable)",
+        )
     app.state.jobs = jobs
     app.state.models = models
+
+    @app.exception_handler(FreesoundUnavailable)
+    def freesound_unavailable(request: Request, error: FreesoundUnavailable) -> JSONResponse:
+        # The rest of the app keeps working: only Freesound search and adding fail (story 35).
+        return JSONResponse(status_code=503, content={"detail": str(error), "reason": error.reason})
 
     @app.exception_handler(JobAlreadyRunning)
     def job_already_running(request: Request, error: JobAlreadyRunning) -> JSONResponse:
@@ -538,6 +792,246 @@ def create_app(
         if job.state is JobState.FAILED:
             raise HTTPException(409, f"the {job.kind} job has no result: {job.error}")
         return job.result
+
+    @app.get("/sounds")
+    def list_sounds() -> list[SoundOut]:
+        """The Sound library, by name, with each sound's credit."""
+        return [SoundOut.of(sound) for sound in sounds.list()]
+
+    @app.get("/sounds/search")
+    def search_freesound(
+        q: str = Query(min_length=1, max_length=200), page: int = Query(1, ge=1, le=1000)
+    ) -> SearchOut:
+        """One page of Freesound results, each with its preview and license (stories 26-28)."""
+        query = " ".join(q.split())
+        if not query:
+            raise HTTPException(422, "type what to search Freesound for")
+        found = freesound.search(query, page)
+        return SearchOut(
+            results=[FreesoundSoundOut.model_validate(s) for s in found.results],
+            count=found.count,
+            page=found.page,
+            has_next=found.has_next,
+        )
+
+    def fetched_from_freesound(freesound_id: int, work: Path) -> tuple[Path, Credit]:
+        """Download a Freesound sound into `work` as standard WAV, with its credit."""
+        try:
+            found: FreesoundSound = freesound.sound(freesound_id)
+            audio = freesound.download(found)
+        except FreesoundSoundMissing as missing:
+            raise HTTPException(404, str(missing)) from None
+        source, converted = work / "download", work / "sound.wav"
+        source.write_bytes(audio)
+        try:
+            convert(source, converted)
+        except UnsupportedAudio:
+            raise HTTPException(
+                502, f"Freesound's file for {found.title!r} has no audio Voicewright can read"
+            ) from None
+        except FfmpegMissing:
+            raise HTTPException(
+                503, "ffmpeg isn't installed, so sounds can't be converted; brew install ffmpeg"
+            ) from None
+        credit = Credit(
+            title=found.title,
+            author=found.author,
+            license=found.license,
+            source=found.url,
+            attribution=found.attribution,
+            freesound_id=found.id,
+        )
+        return converted, credit
+
+    @app.post("/sounds", status_code=201)
+    def add_sound(request: AddSoundRequest) -> SoundOut:
+        """Download a Freesound result, convert it, and keep it under a name (stories 29-31)."""
+        if sounds.get(request.name) is not None:
+            raise HTTPException(409, str(SoundExists(request.name)))
+        with tempfile.TemporaryDirectory(prefix="voicewright-sound-") as work:
+            wav_path, credit = fetched_from_freesound(request.freesound_id, Path(work))
+            try:
+                return SoundOut.of(sounds.add(request.name, wav_path, credit))
+            except SoundExists as taken:
+                raise HTTPException(409, str(taken)) from None
+
+    @app.put("/sounds/{name}")
+    def replace_sound(name: str, request: ReplaceSoundRequest) -> SoundOut:
+        """Swap the sound behind a name for another Freesound result, keeping the name."""
+        if sounds.get(name) is None:
+            raise HTTPException(404, f"the Sound library has no {{{name.strip().lower()}}}")
+        with tempfile.TemporaryDirectory(prefix="voicewright-sound-") as work:
+            wav_path, credit = fetched_from_freesound(request.freesound_id, Path(work))
+            try:
+                return SoundOut.of(sounds.replace(name, wav_path, credit))
+            except SoundMissing as missing:
+                raise HTTPException(404, str(missing)) from None
+
+    @app.get("/sounds/{name}/audio")
+    def get_sound_audio(name: str) -> FileResponse:
+        """A sound's audio, as standard WAV. The name is matched ignoring case."""
+        path = sounds.audio_path(name)
+        if path is None:
+            raise HTTPException(404, f"the Sound library has no {{{name.lower()}}}")
+        return wav(path)
+
+    @app.delete("/sounds/{name}", status_code=204)
+    def remove_sound(name: str) -> None:
+        """Remove a sound from the library."""
+        try:
+            sounds.remove(name)
+        except SoundMissing as missing:
+            raise HTTPException(404, str(missing)) from None
+
+    def checked_script(request: ScriptRequest) -> tuple[Voice, ScriptCheck]:
+        """Check a Script against its Voice. A rejected Script raises a 422 listing every
+        problem (spec stories 41 to 44)."""
+        voice = find_voice(request.voice_id)
+        result = check_script(
+            request.script,
+            has_emotion=lambda emotion: emotion in voice.presets,
+            has_sound=lambda name: sounds.get(name) is not None,
+            supported_effects=vocal_effects.supported_effects,
+        )
+        if not result.ready:
+            raise ScriptRejected(result)
+        return voice, result
+
+    @app.exception_handler(ScriptRejected)
+    def script_rejected(request: Request, rejected: ScriptRejected) -> JSONResponse:
+        body = ScriptCheckOut.of(rejected.result)
+        return JSONResponse(status_code=422, content=body.model_dump())
+
+    @app.post("/scripts/check")
+    def check_a_script(request: ScriptRequest) -> ScriptCheckOut:
+        """Check a Script without generating anything: 200 when ready (with any warnings), or
+        422 listing every missing emotion, missing sound, and parse error at once."""
+        return ScriptCheckOut.of(checked_script(request)[1])
+
+    @app.post("/scripts/generate", status_code=202)
+    def generate(request: ScriptRequest) -> JobStarted:
+        """Check the Script, then start a job that renders it into one Output. A rejected
+        Script is a 422 (the same body as the check) and starts no job."""
+        voice, result = checked_script(request)
+        try:
+            prepared = prepare(result, voice, library, sounds)
+        except ScriptChanged as changed:
+            raise HTTPException(409, f"{changed}; check the Script again") from None
+        try:
+            job = jobs.start("script", generate_output(prepared, models, outputs))
+        except BaseException:
+            prepared.discard()
+            raise
+        return JobStarted(job_id=job.id)
+
+    def find_output(output_id: str) -> Output:
+        output = outputs.get(output_id)
+        if output is None:
+            raise HTTPException(404, f"no Output {output_id}; it may have been cleared")
+        return output
+
+    def output_out(output: Output, saved_as: dict[str, str] | None = None) -> OutputOut:
+        if saved_as is None:
+            saved_as = saved_index()
+        return OutputOut.of(output, saved_as.get(output.id))
+
+    def saved_index() -> dict[str, str]:
+        """Which cached Output each Saved output came from: Output id → Saved output id."""
+        return {
+            s.record["output_id"]: s.id for s in saved_outputs.list() if "output_id" in s.record
+        }
+
+    @app.get("/outputs")
+    def list_outputs() -> list[OutputOut]:
+        """The Output cache, newest first."""
+        saved_as = saved_index()
+        return [output_out(output, saved_as) for output in outputs.list()]
+
+    @app.get("/outputs/{output_id}")
+    def get_output(output_id: str) -> OutputOut:
+        return output_out(find_output(output_id))
+
+    @app.post("/outputs/{output_id}/save", status_code=201)
+    def save_output(output_id: str, response: Response) -> SavedOutputOut:
+        """Copy an Output into the saved folder with its sidecar record (stories 52, 53).
+        Saving it again gives back the first copy, with 200."""
+        output = find_output(output_id)
+        audio = outputs.audio_path(output_id)
+        if audio is None:
+            raise HTTPException(404, f"no Output {output_id}; it may have been cleared")
+        saved, new = saved_outputs.save(output, audio)
+        if not new:
+            response.status_code = 200
+        return SavedOutputOut.of(saved)
+
+    def find_saved(saved_id: str) -> SavedOutput:
+        saved = saved_outputs.get(saved_id)
+        if saved is None:
+            raise HTTPException(404, f"no Saved output {saved_id}")
+        return saved
+
+    @app.get("/saved")
+    def list_saved() -> list[SavedOutputOut]:
+        """Every Saved output, newest first."""
+        return [SavedOutputOut.of(saved) for saved in saved_outputs.list()]
+
+    @app.get("/saved/{saved_id}")
+    def get_saved(saved_id: str) -> SavedOutputOut:
+        return SavedOutputOut.of(find_saved(saved_id))
+
+    @app.get("/saved/{saved_id}/audio")
+    def get_saved_audio(saved_id: str) -> FileResponse:
+        """A Saved output's audio, as standard WAV."""
+        saved = find_saved(saved_id)
+        return FileResponse(
+            saved_outputs.root / saved.audio_file,
+            media_type="audio/wav",
+            filename=saved.audio_file,
+            content_disposition_type="inline",
+        )
+
+    @app.get("/saved/{saved_id}/record")
+    def get_saved_record(saved_id: str) -> FileResponse:
+        """A Saved output's sidecar record, as written."""
+        saved = find_saved(saved_id)
+        return FileResponse(
+            saved_outputs.root / saved.sidecar_file,
+            media_type="application/json",
+            filename=saved.sidecar_file,
+            content_disposition_type="inline",
+        )
+
+    @app.get("/outputs/{output_id}/audio")
+    def get_output_audio(output_id: str) -> FileResponse:
+        """An Output's audio, as standard WAV."""
+        path = outputs.audio_path(output_id)
+        if path is None:
+            raise HTTPException(404, f"no Output {output_id}; it may have been cleared")
+        output = find_output(output_id)
+        return FileResponse(
+            path,
+            media_type="audio/wav",
+            filename=download_name(output.record["voice"]["name"], output.created),
+            content_disposition_type="inline",
+        )
+
+    @app.get("/settings")
+    def get_settings() -> SettingsOut:
+        """The settings the page can change: how many recent Outputs to keep."""
+        return SettingsOut(output_cache_size=outputs.size)
+
+    @app.put("/settings")
+    def change_settings(request: SettingsRequest) -> SettingsOut:
+        """Change the Output cache size (5 to 10), in the config file too. A smaller size
+        removes the oldest Outputs past it at once."""
+        try:
+            save_output_cache_size(config_path, request.output_cache_size)
+        except OSError as error:
+            raise HTTPException(
+                500, f"can't save the setting to {config_path}: {error.strerror or error}"
+            ) from None
+        outputs.resize(request.output_cache_size)
+        return SettingsOut(output_cache_size=outputs.size)
 
     @app.get("/", include_in_schema=False)
     def home() -> FileResponse:

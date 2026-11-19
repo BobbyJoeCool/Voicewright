@@ -1,12 +1,9 @@
 // The Voices area: design a Draft voice, review it, accept or discard it, and edit saved Voices.
-// It talks only to the HTTP API. Anything the user typed goes into the page as text, never HTML.
+// It talks only to the HTTP API, through common.js. User text goes in as text, never HTML.
 (() => {
   "use strict";
 
   const $ = (id) => document.getElementById(id);
-  const jobBox = $("job");
-  const jobMessage = $("job-message");
-  const jobProgress = $("job-progress");
   const errorBox = $("voices-error");
 
   // The Draft voice open for review, if any.
@@ -14,40 +11,7 @@
   // Saved Voice cards the user has opened: they stay open when the list is rebuilt.
   const openVoices = new Set();
 
-  // --- Talking to the API -------------------------------------------------------------------
-
-  async function api(method, path, body) {
-    let response;
-    try {
-      response = await fetch(path, {
-        method,
-        headers: body === undefined ? {} : { "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-    } catch {
-      throw new Error("Can't reach Voicewright; is it still running?");
-    }
-    if (response.status === 204) return null;
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      const error = new Error(describeProblem(data, response.status));
-      error.status = response.status;
-      throw error;
-    }
-    return data;
-  }
-
-  function describeProblem(data, status) {
-    const detail = data && data.detail;
-    if (typeof detail === "string") return capitalize(detail) + ".";
-    if (Array.isArray(detail) && detail.length) {
-      // FastAPI's validation errors: "Value error, describe the voice, …"
-      return capitalize(String(detail[0].msg).replace(/^Value error, /, "")) + ".";
-    }
-    return `Something went wrong (HTTP ${status}).`;
-  }
-
-  const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+  const { api, el, player, runJob, follow, setBusy, isBusy, confirm, showArea } = window.Voicewright;
 
   // Where an action's error shows: next to the control, in the errorSlot(key) rendered beside
   // it, or in the line at the top of the page when the action has no slot.
@@ -93,61 +57,7 @@
     audio.play().catch(() => {});
   }
 
-  // --- Jobs ---------------------------------------------------------------------------------
-
-  const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-
-  function showJob(job) {
-    const { step, total, message } = job.progress;
-    // Step `total` of `total` is the wrap-up after the last step (e.g. reloading the speech
-    // model): it gets no number, since "step 5 of 4" reads as a bug.
-    const counted = total && step < total;
-    jobMessage.textContent = counted ? `${message} (step ${step + 1} of ${total})` : message;
-    if (total) {
-      jobProgress.max = total;
-      jobProgress.value = Math.min(step, total);
-    } else {
-      jobProgress.removeAttribute("value"); // an indeterminate bar
-    }
-    jobBox.hidden = false;
-    setBusy(true);
-  }
-
-  function hideJob() {
-    jobBox.hidden = true;
-    setBusy(false);
-  }
-
-  // While a job runs, buttons that would start another are disabled: the server would say 409.
-  function setBusy(busy) {
-    for (const button of document.querySelectorAll("button[data-starts-job]")) {
-      button.disabled = busy;
-    }
-  }
-
-  async function follow(jobId) {
-    for (;;) {
-      const job = await api("GET", `/jobs/${jobId}`);
-      if (job.state !== "running") {
-        hideJob();
-        if (job.state === "failed") throw new Error(job.error);
-        return job.result;
-      }
-      showJob(job);
-      await sleep(700);
-    }
-  }
-
-  // Start a job with POST `path`, follow it to the end, and return its result.
-  async function runJob(path, body) {
-    setBusy(true); // at once, so a second click can't start a second job
-    try {
-      const { job_id } = await api("POST", path, body);
-      return await follow(job_id);
-    } finally {
-      hideJob();
-    }
-  }
+  // --- Jobs (the bar and runJob live in common.js) ------------------------------------
 
   // A job may already be running when the page opens: loading the speech model at startup, or
   // a design started before the page was reloaded.
@@ -163,21 +73,12 @@
 
   // --- Building the page --------------------------------------------------------------------
 
-  // el("button", {onclick, text: "Go"}, child, …): an element; `text` is set as text, never HTML.
-  function el(tag, props = {}, ...children) {
-    const node = document.createElement(tag);
-    for (const [key, value] of Object.entries(props)) {
-      if (key === "text") node.textContent = value;
-      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
-      else if (key === "dataset") Object.assign(node.dataset, value);
-      else if (value === true) node.setAttribute(key, "");
-      else if (value !== false && value !== undefined) node.setAttribute(key, value);
-    }
-    node.append(...children.filter((child) => child !== null && child !== undefined));
-    return node;
+  // A round badge with the Voice's initial, its color picked from the name so it stays the same.
+  function avatar(name) {
+    let hue = 0;
+    for (const char of name) hue = (hue * 31 + char.codePointAt(0)) % 360;
+    return el("span", { class: "avatar", style: `--hue: ${hue}`, "aria-hidden": "true", text: [...name.trim()][0]?.toUpperCase() ?? "?" });
   }
-
-  const player = (url) => el("audio", { controls: true, preload: "none", src: url });
 
   function jobButton(text, action, errorKey) {
     return el("button", {
@@ -219,7 +120,7 @@
             ? el("span", { class: "muted", text: `(missing ${draft.missing.join(", ")})` })
             : null,
           el("button", { type: "button", text: "Resume", onclick: () => attempt(() => openDraft(draft.id), "drafts") }),
-          el("button", { type: "button", text: "Discard", onclick: () => attempt(() => discard(draft), "drafts") }),
+          el("button", { type: "button", class: "danger", text: "Discard", onclick: () => attempt(() => discard(draft), "drafts") }),
         ),
       ),
     );
@@ -228,7 +129,12 @@
   }
 
   async function discard(draft) {
-    if (!confirm(`Discard the Draft voice "${draft.description}" and every take?`)) return;
+    const sure = await confirm({
+      title: "Discard this Draft voice?",
+      message: `"${draft.description}" and every take made for it will be deleted.`,
+      action: "Discard",
+    });
+    if (!sure) return;
     await api("DELETE", `/voices/drafts/${draft.id}`);
     if (reviewing === draft.id) closeReview();
     await refreshDrafts();
@@ -408,12 +314,14 @@
     const voices = await api("GET", "/voices");
     $("voices").replaceChildren(...voices.map(savedVoice));
     $("no-voices").hidden = voices.length > 0;
+    // The Scripts area offers these Voices to pick from.
+    document.dispatchEvent(new CustomEvent("voicewright:voices", { detail: voices }));
   }
 
   function savedVoice(voice) {
     const reload = async () => {
       await refreshVoices();
-      setBusy(!jobBox.hidden);
+      setBusy(isBusy());
     };
     return el(
       "details",
@@ -423,7 +331,17 @@
         ontoggle: (event) =>
           event.target.open ? openVoices.add(voice.id) : openVoices.delete(voice.id),
       },
-      el("summary", {}, el("strong", { text: voice.name }), " ", el("span", { class: "muted", text: Object.keys(voice.presets).join(", ") })),
+      el(
+        "summary",
+        {},
+        avatar(voice.name),
+        el(
+          "span",
+          { class: "voice-title" },
+          el("strong", { text: voice.name }),
+          el("span", { class: "chips" }, ...Object.keys(voice.presets).map((e) => el("span", { class: "chip emotion", text: e }))),
+        ),
+      ),
       el("p", { class: "muted", text: voice.description }),
       // A pending take shows under its emotion; one for a new emotion, above the Add form.
       ...Object.entries(voice.presets).flatMap(([emotion, preset]) => [
@@ -437,10 +355,16 @@
         { class: "row" },
         el("button", {
           type: "button",
+          class: "danger",
           text: `Delete ${voice.name}`,
           onclick: () =>
             attempt(async () => {
-              if (!confirm(`Delete the Voice "${voice.name}" and all its clips?`)) return;
+              const sure = await confirm({
+                title: `Delete ${voice.name}?`,
+                message: "The Voice and all its clips will be deleted. Scripts that use it will need another Voice.",
+                action: "Delete",
+              });
+              if (!sure) return;
               await api("DELETE", `/voices/${voice.id}`);
               openVoices.delete(voice.id);
               await reload();
@@ -479,10 +403,16 @@
           ? null
           : el("button", {
               type: "button",
+              class: "danger",
               text: "Remove",
               onclick: () =>
                 attempt(async () => {
-                  if (!confirm(`Remove the ${emotion} preset from ${voice.name}?`)) return;
+                  const sure = await confirm({
+                    title: `Remove ${emotion}?`,
+                    message: `The ${emotion} preset and its clip will be removed from ${voice.name}.`,
+                    action: "Remove",
+                  });
+                  if (!sure) return;
                   await api("DELETE", base);
                   await reload();
                 }, key),
@@ -512,7 +442,7 @@
         "div",
         { class: "row" },
         el("button", { type: "button", text: "Accept", onclick: () => decide("POST", `/voices/${voice.id}/takes/${take.id}/accept`) }),
-        el("button", { type: "button", text: "Reject", onclick: () => decide("DELETE", `/voices/${voice.id}/takes/${take.id}`) }),
+        el("button", { type: "button", class: "danger", text: "Reject", onclick: () => decide("DELETE", `/voices/${voice.id}/takes/${take.id}`) }),
       ),
       errorSlot(key),
     );
@@ -527,6 +457,7 @@
       "form",
       {
         class: "preset",
+        dataset: { addPresetFor: voice.id },
         onsubmit: (event) => {
           event.preventDefault();
           attempt(async () => {
@@ -562,10 +493,27 @@
   });
   $("design-form").querySelector("button").dataset.startsJob = "";
 
+  // For the Scripts area: a Script uses an emotion this Voice lacks. Open the Voice's card at
+  // its Add an Emotion preset form, with the name filled in.
+  window.Voicewright.addEmotion = async (voiceId, name) => {
+    showArea("voices");
+    openVoices.add(voiceId);
+    await refreshVoices();
+    setBusy(isBusy());
+    const form = [...document.querySelectorAll("form[data-add-preset-for]")].find(
+      (f) => f.dataset.addPresetFor === voiceId,
+    );
+    if (!form) return;
+    const input = form.querySelector("input");
+    input.value = name;
+    form.scrollIntoView({ block: "center" });
+    input.focus();
+  };
+
   async function refresh() {
     await Promise.all([refreshDrafts(), refreshVoices()]);
     if (reviewing) await openDraft(reviewing);
-    setBusy(!jobBox.hidden);
+    setBusy(isBusy());
   }
 
   attempt(async () => {

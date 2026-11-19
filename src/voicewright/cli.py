@@ -1,8 +1,11 @@
-"""The `voicewright` command: start the local server and open the page in the browser."""
+"""The `voicewright` command: start the local server and open the page in its own window."""
 
 import argparse
 import enum
 import http.client
+import os
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -23,6 +26,16 @@ DEFAULT_PORT = 8765
 # The longest the port check may take in all. Per-read timeouts alone don't bound it: a program
 # that sends a byte every second never trips a two-second read timeout.
 PROBE_SECONDS = 3
+# Browsers that can open a page as an app window (--app): no tabs, no address bar. The first one
+# installed is used. On the Mac they are app bundles; elsewhere, commands on the PATH.
+APP_WINDOW_BROWSERS = ("Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium")
+APP_WINDOW_COMMANDS = (
+    "google-chrome",
+    "microsoft-edge",
+    "brave-browser",
+    "chromium",
+    "chromium-browser",
+)
 
 
 class PortHolder(enum.Enum):
@@ -35,7 +48,7 @@ class PortHolder(enum.Enum):
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="voicewright", description="Start Voicewright and open it in your browser."
+        prog="voicewright", description="Start Voicewright and open it in its own window."
     )
     parser.add_argument(
         "--config",
@@ -47,6 +60,11 @@ def main() -> None:
         type=port_number,
         default=DEFAULT_PORT,
         help="local port to serve the page on (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--tab",
+        action="store_true",
+        help="open the page in a browser tab instead of its own app window",
     )
     args = parser.parse_args()
     url = f"http://{HOST}:{args.port}/"
@@ -68,7 +86,7 @@ def main() -> None:
         )
     if holder is PortHolder.VOICEWRIGHT:
         print(f"Voicewright is already running at {url}", flush=True)
-        webbrowser.open(url)
+        open_page(url, tab=args.tab)
         return
     if holder is PortHolder.OTHER_PROGRAM:
         sys.exit(
@@ -82,7 +100,7 @@ def main() -> None:
     if not models_turned_off():
         app.state.jobs.start("startup", load_speech_model(app.state.models))
     server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=args.port))
-    threading.Thread(target=open_when_started, args=(server, url), daemon=True).start()
+    threading.Thread(target=open_when_started, args=(server, url, args.tab), daemon=True).start()
     try:
         server.run()
     except KeyboardInterrupt:
@@ -187,12 +205,51 @@ def has_voicewright_title(response) -> bool:
     return page_title() in start
 
 
-def open_when_started(server: uvicorn.Server, url: str) -> None:
+def open_when_started(server: uvicorn.Server, url: str, tab: bool = False) -> None:
     # A daemon thread: if the server never starts, it ends with the process.
     while not server.started:
         time.sleep(0.1)
     print(f"Voicewright is running at {url}", flush=True)
+    open_page(url, tab=tab)
+
+
+def open_page(url: str, *, tab: bool = False) -> None:
+    """Open the page in its own app window when a browser that can is installed; otherwise, or
+    with `tab`, in the usual browser. A BROWSER setting is the user's choice, so it wins."""
+    command = None if tab or os.environ.get("BROWSER") else app_window_command(url)
+    if command:
+        try:
+            subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return
+        except OSError:
+            pass  # The browser couldn't be started; a tab still works.
     webbrowser.open(url)
+
+
+def app_window_command(
+    url: str, platform: str = sys.platform, app_folders=None
+) -> list[str] | None:
+    """The command that opens `url` as an app window, or None if no such browser is found."""
+    if platform == "darwin":
+        folders = app_folders or (Path("/Applications"), Path.home() / "Applications")
+        for name in APP_WINDOW_BROWSERS:
+            for folder in folders:
+                app = folder / f"{name}.app"
+                if app.is_dir():
+                    # -n hands the flag over even when the browser is already open.
+                    return ["open", "-na", str(app), "--args", f"--app={url}"]
+        return None
+    for name in APP_WINDOW_COMMANDS:
+        found = shutil.which(name)
+        if found:
+            return [found, f"--app={url}"]
+    return None
 
 
 if __name__ == "__main__":

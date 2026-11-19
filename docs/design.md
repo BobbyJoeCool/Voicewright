@@ -36,7 +36,7 @@ Everything runs locally and uses free, open-source models. The only network use 
 | Speech and voice cloning | Chatterbox via `chatterbox-mlx` (`hybrid-mlx` backend: the `ChatterboxTTSMLX` class, loaded with `device="mps"`), MIT license | Tested, works |
 | Voice design from a text description, neutral clip and every emotion preset | Qwen3-TTS VoiceDesign via `mlx-audio` (`mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16`). VoxCPM2 also ran but sounded weaker and needs about 13GB | Chosen in step 0.2 |
 | Vocal effects in the speaker's voice | None in v1. Chatterbox Turbo (`chatterbox-tts`) runs on the M2 but only its chuckle was convincing (see Open questions and tests). Breeze TTS 2 ruled out: documented for Linux with NVIDIA CUDA only, and its weights are non-commercial | Deferred |
-| Sound effects | Local sound library, filled by searching Freesound in the app | Not started |
+| Sound effects | Local sound library, filled by searching Freesound in the app (high-quality previews; originals need OAuth2) | Built in phase 3 |
 | Audio conversion and assembly | ffmpeg through `pydub` | Not started |
 | Backend and UI | FastAPI, serving a local web page | Not started |
 
@@ -125,6 +125,15 @@ Example: `[angry] I hate you! (scream) {explosion}` becomes:
 
 Untagged text uses the neutral preset.
 
+Parsing rules (step 4.1):
+
+- Names inside markers are matched ignoring case: `[Angry]` is `[angry]`, `{Door-Slam}` is `{door-slam}`.
+- An Emotion tag or Vocal effect is one word: lowercase letters, digits, `-` and `_`, starting with a letter. A Sound effect follows the sound-name rule in section 6.
+- A marker closes on its own line, before any other bracket. Otherwise it's a parse error at the opening bracket. So are a closing bracket with no opener, an empty marker, and a marker holding something that can't be a name (`(and then)`). Each error gives its character position and its line and column, and parsing carries on so every error is reported at once.
+- Whitespace inside speech is collapsed to single spaces; speech that is only whitespace is dropped.
+- A Script with nothing to say or play (empty, or only Vocal effects and tags) is rejected with a parse error.
+- An Emotion tag is checked against the Voice even if no speech follows it.
+
 Before any generation starts, the script is validated:
 
 - Every emotion tag must match an emotion preset on the chosen Voice.
@@ -152,7 +161,11 @@ Tuning guidance from the `chatterbox-mlx` README:
 
 - Each entry has a name (the text inside `{}`), an audio file, its source, and its license.
 - To add a sound, the user searches Freesound in the app, previews results, and picks one. The app downloads it, converts it, and stores it with its license and attribution.
+- What the app downloads is Freesound's high-quality preview (OGG, about 192 kbps), not the original upload. An API key covers search, sound details, and previews; original files need OAuth2, a per-user login flow with a registered app and a redirect, which is a lot of machinery for a local app. A 192 kbps preview is plenty for sound effects in a mono WAV Output. Downloading originals through OAuth2 is a future feature.
 - One audio file per name in v1.
+- Names are lowercase letters, digits, `-` and `_`, starting with a letter or digit, up to 60 characters (`{door-slam}`). A name typed with capitals is the same sound.
+- Adding under a name already taken is refused; replacing is a separate action that keeps the name.
+- The API key comes from the `FREESOUND_API_KEY` environment variable, or else `freesound_api_key` in the config file, read on each search so a new key works without a restart.
 
 ## 7. Assembly
 
@@ -163,6 +176,10 @@ Tuning guidance from the `chatterbox-mlx` README:
 
 Sound effects play in sequence with speech in v1.
 
+Starting values (step 4.2, to tune by ear): 350 ms of silence between pieces, a 10 ms fade at each end of every piece against clicks, every piece brought to -20 dBFS RMS without its peak passing -1 dBFS, and everything resampled to the highest sample rate among the pieces (Chatterbox speaks at 24 kHz, Freesound previews are often 44.1 kHz).
+
+What a Script uses (each emotion's Reference clip and values, each sound and its credit) is copied when generation starts, so editing the Voice or the Sound library during the job doesn't change that Output.
+
 ## 8. Output storage
 
 Generated audio is presented but not kept by default.
@@ -171,6 +188,10 @@ Generated audio is presented but not kept by default.
 2. The cache keeps the last N outputs (setting: 5 to 10). When it's full, the oldest is deleted.
 3. A **Save** action copies an output into a separate **saved folder** that cleanup never touches, with a sidecar record of the script text, the Voice, the preset values used, and credits and licenses for every sound effect used.
 4. The output cache is cleared on app startup. The draft area is not.
+
+A Saved output is two files side by side in `saved/`, named by its id: when it was saved, the Voice, and a short random part (`2026-11-07-143022-old-narrator-1a2b3c.wav` and `.json`). The sidecar holds the Script, the Voice (name, id, description), the exaggeration and cfg of each emotion the Script used, the credit of each sound used (name, title, author, license, source URL, attribution), the warnings, and the length. The record is built when generation starts, so the credits are those of the sounds actually used, even if one is replaced before saving.
+
+The cache size is `output_cache_size` in the config file (default 5). The page changes it through `PUT /settings`, which rewrites only that line of the file, keeping comments and the API key. A value outside 5 to 10 in the file stops startup with a message saying how to fix it, as other bad settings do.
 
 ## Backend endpoints (draft)
 
@@ -186,8 +207,17 @@ Generated audio is presented but not kept by default.
 | `GET /sounds` | List the sound library |
 | `GET /sounds/search` | Search Freesound |
 | `POST /sounds` | Download a Freesound result into the sound library |
-| `POST /generate` | Validate a tagged script against a voice, then return the output |
-| `POST /outputs/{id}/save` | Copy a cached output and its sidecar to the saved folder |
+| `PUT /sounds/{name}` | Replace the sound behind a name with another Freesound result |
+| `DELETE /sounds/{name}` | Remove a sound |
+| `GET /sounds/{name}/audio` | Play a sound |
+| `POST /scripts/check` | Check a Script against a Voice: 200 with `warnings`, or 422 listing `missing_emotions`, `missing_sounds`, and `parse_errors` |
+| `POST /scripts/generate` | Check the Script (422, no job, if rejected), then start a job that renders it into one Output; progress counts Segments |
+| `GET /outputs` | List the Output cache, newest first, each with its record |
+| `GET /outputs/{id}`, `GET /outputs/{id}/audio` | One Output, and its audio |
+| `GET /settings`, `PUT /settings` | Read or change the Output cache size (5 to 10); a change is written to the config file, and a smaller size removes the oldest Outputs at once |
+| `POST /outputs/{id}/save` | Copy a cached Output to the saved folder with its sidecar record (201; saving it again gives back the first copy, 200) |
+| `GET /saved`, `GET /saved/{id}` | List Saved outputs, newest first, or get one, with its record |
+| `GET /saved/{id}/audio`, `GET /saved/{id}/record` | A Saved output's WAV, and its sidecar JSON |
 
 ## Open questions and tests
 

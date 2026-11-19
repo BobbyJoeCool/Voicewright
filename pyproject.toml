@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voicewright"
-version = "0.1.0"
+version = "1.0.0"
 description = "Local web app that designs custom voices and turns tagged Scripts into finished audio."
 readme = "README.md"
 # chatterbox-mlx requires >=3.11,<3.13 (docs/design.md, Environment).
@@ -33,6 +33,11 @@ voice-design = [
 dev = [
     "httpx2>=2.0",
     "pytest>=8",
+    # Coverage reports: `pytest --cov=voicewright`.
+    "pytest-cov>=6",
+    # Browser E2E tests in tests/e2e (`pytest tests/e2e`); browsers come from
+    # `playwright install chromium`.
+    "pytest-playwright>=0.7",
     "ruff>=0.6",
 ]
 
@@ -49,10 +54,16 @@ voicewright = ["static/*", "*.json"]
 testpaths = ["tests"]
 # The smoke tests load real models: run them by hand with `pytest -m smoke -s`.
 addopts = "-m 'not smoke'"
-markers = ["smoke: loads a real model on the M2; slow, and run by hand"]
+# The browser E2E tests in tests/e2e run only when asked for: `pytest tests/e2e` (tests/conftest.py).
+markers = [
+    "smoke: loads a real model on the M2; slow, and run by hand",
+    "e2e: drives the page in a real browser (Playwright) against the app on fakes",
+]
 filterwarnings = [
     # pydub imports audioop; harmless on the 3.11 and 3.12 this project supports.
     "ignore:'audioop' is deprecated:DeprecationWarning:pydub",
+    # pytest-playwright's own base_url fixture, under pytest 9; nothing to change on our side.
+    "ignore:Session-scoped fixtures defined as instance methods:pytest.PytestRemovedIn10Warning",
 ]
 
 [tool.ruff]
