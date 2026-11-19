@@ -182,7 +182,7 @@
 
   function searchResult(result, offeredName) {
     const line = errorLine();
-    const done = el("p", { class: "muted", hidden: true });
+    const done = el("p", { class: "muted done", hidden: true });
     const name = el("input", {
       type: "text",
       maxlength: 60,
@@ -193,10 +193,14 @@
       ? actionButton(`Replace {${replacing}}`, "Replacing…", line, async () => {
           const target = replacing;
           await api("PUT", `/sounds/${target}`, { freesound_id: result.id });
+          // Leaving replace mode redraws the results, so the message goes on this result's new card.
           stopReplacing();
           await refreshLibrary();
-          done.textContent = `Replaced {${target}} with this sound.`;
-          done.hidden = false;
+          const shown = document.querySelector(`#sound-results [data-freesound-id="${result.id}"] .done`);
+          if (shown) {
+            shown.textContent = `Replaced {${target}} with this sound.`;
+            shown.hidden = false;
+          }
         })
       : actionButton("Add", "Adding…", line, async () => {
           const sound = await api("POST", "/sounds", { freesound_id: result.id, name: name.value });
