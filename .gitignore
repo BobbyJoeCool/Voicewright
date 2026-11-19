@@ -162,3 +162,6 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.coverage
+# Playwright traces and screenshots from failed E2E runs
+test-results/

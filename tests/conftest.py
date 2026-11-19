@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import pytest
 from fakes import FakeEngines, FakeFreesound
@@ -11,6 +12,21 @@ from voicewright.engines import NO_MODELS
 # No test loads a real model, even with the speech extra installed: this reaches every app the
 # tests start, in-process or as the installed `voicewright` command. The smoke tests opt back in.
 os.environ[NO_MODELS] = "1"
+
+E2E_FOLDER = Path(__file__).parent / "e2e"
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Leave the browser E2E tests out of a plain `pytest`: they need Playwright's browsers and
+    take longer. Naming them (`pytest tests/e2e`, or a file in it) runs them."""
+    if collection_path != E2E_FOLDER:
+        return None
+    asked = any(
+        E2E_FOLDER == Path(arg.split("::")[0]).resolve()
+        or E2E_FOLDER in Path(arg.split("::")[0]).resolve().parents
+        for arg in config.args
+    )
+    return None if asked else True
 
 
 @pytest.fixture(autouse=True)
